@@ -1,0 +1,60 @@
+spring:
+  application:
+    name: safepay
+
+  # MySQL
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:safepay}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: ${DB_USERNAME:safepay}
+    password: ${DB_PASSWORD:safepay1234}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 3000
+
+  # JPA
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+    open-in-view: false
+
+  # Redis
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# JWT
+jwt:
+  secret: ${JWT_SECRET:safepay-jwt-secret-key-for-development-only-change-in-production-please}
+  access-token-expiry: 1800000    # 30분
+  refresh-token-expiry: 604800000 # 7일
+
+# Encryption
+encryption:
+  aes-key: ${AES_SECRET_KEY:safepay-aes-256-secret!}
+
+# Swagger
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+# Logging
+logging:
+  level:
+    com.safepay: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+# Server
+server:
+  port: 8080
