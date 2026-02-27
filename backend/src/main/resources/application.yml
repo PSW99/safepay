@@ -2,7 +2,7 @@ spring:
   application:
     name: safepay
   profiles:
-    active: ${SPRING_PROFILES_ACTIVE:local}
+    active: ${SPRING_PROFILES_ACTIVE}
 
   # MySQL
   datasource:
@@ -53,9 +53,8 @@ springdoc:
 # Logging
 logging:
   level:
-    com.safepay: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    com.safepay: INFO
+    org.hibernate.SQL: INFO
 
 # Server
 server:

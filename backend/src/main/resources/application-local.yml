@@ -5,3 +5,10 @@ jwt:
 # Encryption
 encryption:
   aes-key: safepay-aes-256-secret!
+
+# Logging
+logging:
+  level:
+    com.safepay: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
