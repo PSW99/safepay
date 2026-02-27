@@ -1,0 +1,7 @@
+# JWT
+jwt:
+  secret: safepay-jwt-secret-key-for-development-only-change-in-production-please
+
+# Encryption
+encryption:
+  aes-key: safepay-aes-256-secret!
