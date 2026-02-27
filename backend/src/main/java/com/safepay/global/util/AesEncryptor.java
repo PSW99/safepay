@@ -1,0 +1,83 @@
+package com.safepay.global.util;
+
+import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.ByteBuffer;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+@Slf4j
+@Component
+public class AesEncryptor {
+
+    private static final String ALGORITHM = "AES";
+    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final int GCM_IV_LENGTH = 12;
+    private static final int GCM_TAG_LENGTH = 128;
+
+    @Value("${encryption.aes-key}")
+    private String aesKeyString;
+
+    private SecretKeySpec secretKey;
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    @PostConstruct
+    public void init() {
+        // 키를 32바이트로 맞춤
+        byte[] keyBytes = new byte[32];
+        byte[] rawKey = aesKeyString.getBytes();
+        System.arraycopy(rawKey, 0, keyBytes, 0, Math.min(rawKey.length, 32));
+        this.secretKey = new SecretKeySpec(keyBytes, ALGORITHM);
+    }
+
+    public String encrypt(String plainText) {
+        try {
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            secureRandom.nextBytes(iv);
+
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey, parameterSpec);
+
+            byte[] encryptedBytes = cipher.doFinal(plainText.getBytes());
+
+            // IV + 암호문을 합쳐서 Base64 인코딩
+            ByteBuffer byteBuffer = ByteBuffer.allocate(iv.length + encryptedBytes.length);
+            byteBuffer.put(iv);
+            byteBuffer.put(encryptedBytes);
+
+            return Base64.getEncoder().encodeToString(byteBuffer.array());
+        } catch (Exception e) {
+            log.error("Encryption failed", e);
+            throw new RuntimeException("암호화에 실패했습니다", e);
+        }
+    }
+
+    public String decrypt(String encryptedText) {
+        try {
+            byte[] decoded = Base64.getDecoder().decode(encryptedText);
+            ByteBuffer byteBuffer = ByteBuffer.wrap(decoded);
+
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            byteBuffer.get(iv);
+
+            byte[] cipherText = new byte[byteBuffer.remaining()];
+            byteBuffer.get(cipherText);
+
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, parameterSpec);
+
+            return new String(cipher.doFinal(cipherText));
+        } catch (Exception e) {
+            log.error("Decryption failed", e);
+            throw new RuntimeException("복호화에 실패했습니다", e);
+        }
+    }
+}
