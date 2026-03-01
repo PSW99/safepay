@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: safepay-test
+
+  # Testcontainers MySQL
+  datasource:
+    hikari:
+      maximum-pool-size: 5
+
+  # JPA
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+    open-in-view: false
+
+  # Redis 비활성화
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+
+# JWT
+jwt:
+  secret: safepay-test-jwt-secret-key-must-be-at-least-256-bits-long-for-hmac-sha
+  access-token-expiry: 1800000
+  refresh-token-expiry: 604800000
+
+# Encryption
+encryption:
+  aes-key: safepay-test-aes-256-key!!
+
+# Logging
+logging:
+  level:
+    com.safepay: WARN
+    org.hibernate.SQL: WARN
+    org.testcontainers: WARN
