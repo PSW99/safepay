@@ -281,9 +281,16 @@ class AuthControllerTest extends IntegrationTestBase {
                                     new LoginRequest("test@safepay.com", "wrongPassword"))))
                     .andReturn();
 
-            // Then: 동일한 HTTP 상태코드 & 에러 코드
+            // Then: 동일한 HTTP 상태코드 & 에러 코드 (계정 존재 여부 노출 방지)
             assertThat(result1.getResponse().getStatus())
                     .isEqualTo(result2.getResponse().getStatus());
+
+            String body1 = result1.getResponse().getContentAsString();
+            String body2 = result2.getResponse().getContentAsString();
+            assertThat(objectMapper.readTree(body1).get("code").asText())
+                    .isEqualTo("AUTH_001");
+            assertThat(objectMapper.readTree(body2).get("code").asText())
+                    .isEqualTo("AUTH_001");
         }
 
         @Test

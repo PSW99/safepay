@@ -15,7 +15,7 @@ jwt:
 
 # Encryption
 encryption:
-  aes-key: safepay-aes-256-secret!
+  aes-key: safepay-aes-256-secret!-for-local-dev
 
 # Logging
 logging:

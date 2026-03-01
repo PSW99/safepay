@@ -29,11 +29,15 @@ public class AesEncryptor {
 
     @PostConstruct
     public void init() {
-        // 키를 32바이트로 맞춤
-        byte[] keyBytes = new byte[32];
-        byte[] rawKey = aesKeyString.getBytes();
-        System.arraycopy(rawKey, 0, keyBytes, 0, Math.min(rawKey.length, 32));
-        this.secretKey = new SecretKeySpec(keyBytes, ALGORITHM);
+        if (aesKeyString == null || aesKeyString.isBlank()) {
+            throw new IllegalStateException("AES 암호화 키가 설정되지 않았습니다 (encryption.aes-key)");
+        }
+        byte[] rawKey = aesKeyString.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (rawKey.length < 32) {
+            throw new IllegalStateException(
+                    "AES 키는 32바이트(256bit) 이상이어야 합니다. 현재: " + rawKey.length + "바이트");
+        }
+        this.secretKey = new SecretKeySpec(rawKey, 0, 32, ALGORITHM);
     }
 
     public String encrypt(String plainText) {

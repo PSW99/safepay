@@ -18,7 +18,7 @@ class AesEncryptorTest {
     @BeforeEach
     void setUp() {
         aesEncryptor = new AesEncryptor();
-        ReflectionTestUtils.setField(aesEncryptor, "aesKeyString", "safepay-test-aes-256-key!!");
+        ReflectionTestUtils.setField(aesEncryptor, "aesKeyString", "safepay-test-aes-256-key!!-padding");
         aesEncryptor.init();
     }
 

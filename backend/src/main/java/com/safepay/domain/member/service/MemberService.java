@@ -39,7 +39,7 @@ public class MemberService {
                 .build();
 
         Member saved = memberRepository.save(member);
-        log.info("회원 가입 완료: memberId={}, email={}", saved.getId(), saved.getEmail());
+        log.info("회원 가입 완료: memberId={}", saved.getId());
 
         return new SignupResponse(saved.getId(), saved.getEmail());
     }

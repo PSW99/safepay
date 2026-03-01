@@ -32,7 +32,7 @@ jwt:
 
 # Encryption
 encryption:
-  aes-key: safepay-test-aes-256-key!!
+  aes-key: safepay-test-aes-256-key!!-padding
 
 # Logging
 logging:
