@@ -49,7 +49,7 @@ public class AesEncryptor {
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, parameterSpec);
 
-            byte[] encryptedBytes = cipher.doFinal(plainText.getBytes());
+            byte[] encryptedBytes = cipher.doFinal(plainText.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
             // IV + 암호문을 합쳐서 Base64 인코딩
             ByteBuffer byteBuffer = ByteBuffer.allocate(iv.length + encryptedBytes.length);
@@ -66,6 +66,9 @@ public class AesEncryptor {
     public String decrypt(String encryptedText) {
         try {
             byte[] decoded = Base64.getDecoder().decode(encryptedText);
+            if (decoded.length < GCM_IV_LENGTH + 16) {
+                throw new IllegalArgumentException("암호문이 너무 짧습니다 (최소 " + (GCM_IV_LENGTH + 16) + "바이트 필요)");
+            }
             ByteBuffer byteBuffer = ByteBuffer.wrap(decoded);
 
             byte[] iv = new byte[GCM_IV_LENGTH];
@@ -78,7 +81,7 @@ public class AesEncryptor {
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
             cipher.init(Cipher.DECRYPT_MODE, secretKey, parameterSpec);
 
-            return new String(cipher.doFinal(cipherText));
+            return new String(cipher.doFinal(cipherText), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.error("Decryption failed", e);
             throw new RuntimeException("복호화에 실패했습니다", e);

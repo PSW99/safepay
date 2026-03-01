@@ -9,6 +9,7 @@ import com.safepay.global.security.JwtTokenProvider;
 import com.safepay.global.util.AesEncryptor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,10 +39,13 @@ public class MemberService {
                 .phone(aesEncryptor.encrypt(request.getPhone()))
                 .build();
 
-        Member saved = memberRepository.save(member);
-        log.info("회원 가입 완료: memberId={}", saved.getId());
-
-        return new SignupResponse(saved.getId(), saved.getEmail());
+        try {
+            Member saved = memberRepository.save(member);
+            log.info("회원 가입 완료: memberId={}", saved.getId());
+            return new SignupResponse(saved.getId(), saved.getEmail());
+        } catch (DataIntegrityViolationException e) {
+            throw new CustomException(ErrorCode.AUTH_DUPLICATE_EMAIL);
+        }
     }
 
     @Transactional(readOnly = true)
