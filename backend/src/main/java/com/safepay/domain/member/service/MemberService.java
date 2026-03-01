@@ -43,4 +43,26 @@ public class MemberService {
 
         return new SignupResponse(saved.getId(), saved.getEmail());
     }
+
+    @Transactional(readOnly = true)
+    public LoginResponse login(LoginRequest request) {
+        // 이메일로 회원 조회
+        Member member = memberRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new CustomException(ErrorCode.AUTH_INVALID_CREDENTIALS));
+
+        // 비밀번호 검증
+        if (!passwordEncoder.matches(request.getPassword(), member.getPassword())) {
+            throw new CustomException(ErrorCode.AUTH_INVALID_CREDENTIALS);
+        }
+
+        // JWT 토큰 생성
+        String accessToken = jwtTokenProvider.createAccessToken(
+                member.getId(), member.getEmail(), member.getRole().name());
+        String refreshToken = jwtTokenProvider.createRefreshToken(
+                member.getId(), member.getEmail(), member.getRole().name());
+
+        log.info("로그인 성공: memberId={}", member.getId());
+
+        return new LoginResponse(accessToken, refreshToken, member.getId(), member.getEmail());
+    }
 }
