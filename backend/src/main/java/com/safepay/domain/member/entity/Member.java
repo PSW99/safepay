@@ -1,4 +1,4 @@
-package com.safepay.domain.entity;
+package com.safepay.domain.member.entity;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;

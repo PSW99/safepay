@@ -1,5 +1,9 @@
 package com.safepay.unit.member;
 
+import com.safepay.domain.member.dto.AuthDto.*;
+import com.safepay.domain.member.entity.Member;
+import com.safepay.domain.member.repository.MemberRepository;
+import com.safepay.domain.member.service.MemberService;
 import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import com.safepay.global.security.JwtTokenProvider;
