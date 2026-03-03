@@ -26,6 +26,13 @@ public class TransactionService {
     @Transactional
     public TransactionResponse deposit(Long accountId, Long memberId,
                                        DepositRequest request, String idempotencyKey) {
+        // 멱등성 체크
+        TransactionResponse existing = checkIdempotency(idempotencyKey);
+        if (existing != null) {
+            log.info("중복 입금 요청 감지: idempotencyKey={}", idempotencyKey);
+            return existing;
+        }
+
         // 비관적 락으로 계좌 조회
         Account account = accountRepository.findByIdWithLock(accountId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
@@ -53,6 +60,13 @@ public class TransactionService {
     @Transactional
     public TransactionResponse withdraw(Long accountId, Long memberId,
                                         TransactionDto.WithdrawRequest request, String idempotencyKey) {
+        // 멱등성 체크
+        TransactionResponse existing = checkIdempotency(idempotencyKey);
+        if (existing != null) {
+            log.info("중복 출금 요청 감지: idempotencyKey={}", idempotencyKey);
+            return existing;
+        }
+
         // 비관적 락으로 계좌 조회
         Account account = accountRepository.findByIdWithLock(accountId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
@@ -74,5 +88,12 @@ public class TransactionService {
                 accountId, request.getAmount(), account.getBalance());
 
         return TransactionResponse.from(tx);
+    }
+
+    // Private
+    private TransactionResponse checkIdempotency(String idempotencyKey) {
+        return transactionRepository.findByIdempotencyKey(idempotencyKey)
+                .map(TransactionResponse::from)
+                .orElse(null);
     }
 }
