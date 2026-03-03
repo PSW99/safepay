@@ -11,7 +11,14 @@ public class AccountNumberGenerator {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     public String generate(String accountType) {
-        String productCode = "SAVINGS".equals(accountType) ? "02" : "01";
+        String productCode;
+        if ("CHECKING".equals(accountType)) {
+            productCode = "01";
+        } else if ("SAVINGS".equals(accountType)) {
+            productCode = "02";
+        } else {
+            throw new IllegalArgumentException("지원하지 않는 계좌 유형입니다: " + accountType);
+        }
         String serialNumber = String.format("%06d", RANDOM.nextInt(1_000_000));
         String baseNumber = BANK_CODE + productCode + serialNumber;
         int checkDigit = calculateLuhnCheckDigit(baseNumber);

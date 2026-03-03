@@ -85,7 +85,7 @@ class AccountServiceTest {
             given(accountNumberGenerator.generate("CHECKING")).willReturn("100-01-123456-7");
             given(aesEncryptor.encrypt("100-01-123456-7")).willReturn("encryptedNumber");
             given(accountRepository.existsByAccountNumber("encryptedNumber")).willReturn(false);
-            given(accountRepository.save(any(Account.class))).willReturn(account);
+            given(accountRepository.saveAndFlush(any(Account.class))).willReturn(account);
 
             // When
             CreateResponse response = accountService.createAccount(1L, request);
@@ -105,14 +105,14 @@ class AccountServiceTest {
             given(accountNumberGenerator.generate("CHECKING")).willReturn("100-01-123456-7");
             given(aesEncryptor.encrypt("100-01-123456-7")).willReturn("encryptedNumber");
             given(accountRepository.existsByAccountNumber("encryptedNumber")).willReturn(false);
-            given(accountRepository.save(any(Account.class))).willReturn(account);
+            given(accountRepository.saveAndFlush(any(Account.class))).willReturn(account);
 
             // When
             accountService.createAccount(1L, request);
 
             // Then
             verify(aesEncryptor).encrypt("100-01-123456-7");
-            verify(accountRepository).save(any(Account.class));
+            verify(accountRepository).saveAndFlush(any(Account.class));
         }
 
         @Test
@@ -144,7 +144,7 @@ class AccountServiceTest {
             given(accountNumberGenerator.generate("SAVINGS")).willReturn("100-02-654321-3");
             given(aesEncryptor.encrypt("100-02-654321-3")).willReturn("encryptedSavings");
             given(accountRepository.existsByAccountNumber("encryptedSavings")).willReturn(false);
-            given(accountRepository.save(any(Account.class))).willReturn(savingsAccount);
+            given(accountRepository.saveAndFlush(any(Account.class))).willReturn(savingsAccount);
 
             // When
             CreateResponse response = accountService.createAccount(1L, request);

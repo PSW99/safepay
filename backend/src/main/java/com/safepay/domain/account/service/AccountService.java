@@ -11,6 +11,7 @@ import com.safepay.global.util.AccountNumberGenerator;
 import com.safepay.global.util.AesEncryptor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,7 +33,7 @@ public class AccountService {
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.AUTH_INVALID_CREDENTIALS));
 
-        // 계좌번호 생성 (중복 체크 + 암호화 포함)
+        // 계좌번호 생성 및 암호화
         String[] numbers = generateUniqueAccountNumber(request.getAccountType().name());
         String accountNumber = numbers[0];    // 평문 (응답용)
         String encryptedNumber = numbers[1];  // 암호문 (저장용)
@@ -43,10 +44,13 @@ public class AccountService {
                 .accountType(request.getAccountType())
                 .build();
 
-        Account saved = accountRepository.save(account);
-        log.info("계좌 개설 완료: accountId={}, memberId={}", saved.getId(), memberId);
-
-        return new CreateResponse(saved.getId(), accountNumber);
+        try {
+            Account saved = accountRepository.saveAndFlush(account);
+            log.info("계좌 개설 완료: accountId={}, memberId={}", saved.getId(), memberId);
+            return new CreateResponse(saved.getId(), accountNumber);
+        } catch (DataIntegrityViolationException e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -77,11 +81,14 @@ public class AccountService {
         while (true) {
             String accountNumber = accountNumberGenerator.generate(accountType);
             String encrypted = aesEncryptor.encrypt(accountNumber);
+            // TODO: AES-GCM의 무작위 IV로 인해 동일 평문도 매번 다른 암호문을 생성하므로,
+            //       이 체크는 암호문 수준의 충돌만 감지할 뿐 평문 중복을 막지 못함.
+            //       Phase 2에서 HMAC-SHA-256 블라인드 인덱스 컬럼으로 대체 예정.
             if (!accountRepository.existsByAccountNumber(encrypted)) {
                 return new String[]{accountNumber, encrypted};
             }
             if (++attempts >= 10) {
-                throw new RuntimeException("계좌번호 생성에 실패했습니다");
+                throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
             }
         }
     }
