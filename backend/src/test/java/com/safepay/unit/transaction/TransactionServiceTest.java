@@ -70,6 +70,21 @@ class TransactionServiceTest {
         account.deposit(amount);
     }
 
+    private Transaction createSavedTransaction(String key, Transaction.TransactionType type,
+                                               BigDecimal amount, BigDecimal balanceAfter) {
+        Transaction tx = Transaction.builder()
+                .account(account)
+                .type(type)
+                .amount(amount)
+                .balanceAfter(balanceAfter)
+                .description("기존 거래")
+                .idempotencyKey(key)
+                .status(Transaction.TransactionStatus.SUCCESS)
+                .build();
+        ReflectionTestUtils.setField(tx, "id", 100L);
+        return tx;
+    }
+
     // 입금
     @Nested
     @DisplayName("입금")
@@ -328,6 +343,106 @@ class TransactionServiceTest {
                     .isInstanceOf(CustomException.class)
                     .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
                             .isEqualTo(ErrorCode.ACCOUNT_NOT_OWNER));
+        }
+    }
+    // 멱등성
+    @Nested
+    @DisplayName("멱등성 (Idempotency)")
+    class Idempotency {
+
+        @Test
+        @DisplayName("동일한 Idempotency Key로 입금 2번 요청 시 잔액은 1번만 변경된다")
+        void deposit_duplicateKey_balanceChangedOnce() {
+            // Given
+            String sameKey = "same-key-uuid";
+            DepositRequest request = new DepositRequest(new BigDecimal("10000"), "입금");
+
+            // 첫 번째 요청: 정상 처리
+            Transaction existingTx = createSavedTransaction(
+                    sameKey, Transaction.TransactionType.DEPOSIT,
+                    new BigDecimal("10000"), new BigDecimal("10000"));
+
+            // 두 번째 요청: 이미 존재하는 키 → 기존 결과 반환
+            given(transactionRepository.findByIdempotencyKey(sameKey))
+                    .willReturn(Optional.of(existingTx));
+
+            // When
+            TransactionResponse response = transactionService.deposit(ACCOUNT_ID, MEMBER_ID, request, sameKey);
+
+            // Then: 기존 거래 결과를 반환
+            assertThat(response.getTransactionId()).isEqualTo(100L);
+            assertThat(response.getAmount()).isEqualByComparingTo(new BigDecimal("10000"));
+
+            // 계좌 조회, 저장이 호출되지 않아야 한다 (이미 처리된 요청)
+            verify(accountRepository, never()).findByIdWithLock(any());
+            verify(transactionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("동일한 Idempotency Key로 출금 2번 요청 시 잔액은 1번만 변경된다")
+        void withdraw_duplicateKey_balanceChangedOnce() {
+            // Given
+            String sameKey = "same-key-uuid";
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("5000"), "출금");
+
+            Transaction existingTx = createSavedTransaction(
+                    sameKey, Transaction.TransactionType.WITHDRAW,
+                    new BigDecimal("5000"), new BigDecimal("5000"));
+
+            given(transactionRepository.findByIdempotencyKey(sameKey))
+                    .willReturn(Optional.of(existingTx));
+
+            // When
+            TransactionResponse response = transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, sameKey);
+
+            // Then
+            assertThat(response.getTransactionId()).isEqualTo(100L);
+            verify(accountRepository, never()).findByIdWithLock(any());
+            verify(transactionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("중복 요청 시 에러가 아닌 이전 성공 결과를 반환한다 (UX)")
+        void duplicate_returnsExistingResult_notError() {
+            // Given
+            String sameKey = "same-key-uuid";
+            DepositRequest request = new DepositRequest(new BigDecimal("10000"), "입금");
+
+            Transaction existingTx = createSavedTransaction(
+                    sameKey, Transaction.TransactionType.DEPOSIT,
+                    new BigDecimal("10000"), new BigDecimal("10000"));
+
+            given(transactionRepository.findByIdempotencyKey(sameKey))
+                    .willReturn(Optional.of(existingTx));
+
+            // When & Then: 예외가 발생하지 않고 정상 응답을 반환
+            TransactionResponse response = transactionService.deposit(ACCOUNT_ID, MEMBER_ID, request, sameKey);
+            assertThat(response.getStatus()).isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("서로 다른 Idempotency Key는 각각 독립적으로 처리된다")
+        void differentKeys_processedIndependently() {
+            // Given
+            String key1 = "key-1";
+            String key2 = "key-2";
+            DepositRequest request = new DepositRequest(new BigDecimal("5000"), "입금");
+
+            given(transactionRepository.findByIdempotencyKey(key1)).willReturn(Optional.empty());
+            given(transactionRepository.findByIdempotencyKey(key2)).willReturn(Optional.empty());
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.save(any(Transaction.class))).willAnswer(invocation -> {
+                Transaction tx = invocation.getArgument(0);
+                ReflectionTestUtils.setField(tx, "id", 1L);
+                return tx;
+            });
+
+            // When
+            transactionService.deposit(ACCOUNT_ID, MEMBER_ID, request, key1);
+            transactionService.deposit(ACCOUNT_ID, MEMBER_ID, request, key2);
+
+            // Then: 잔액이 2번 증가 (5000 + 5000 = 10000)
+            assertThat(account.getBalance()).isEqualByComparingTo(new BigDecimal("10000"));
         }
     }
 }
