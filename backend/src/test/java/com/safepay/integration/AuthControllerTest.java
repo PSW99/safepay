@@ -1,6 +1,7 @@
 package com.safepay.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safepay.domain.account.repository.AccountRepository;
 import com.safepay.domain.member.dto.AuthDto.*;
 import com.safepay.domain.member.repository.MemberRepository;
 import org.junit.jupiter.api.*;
@@ -25,10 +26,14 @@ class AuthControllerTest extends IntegrationTestBase {
     private ObjectMapper objectMapper;
 
     @Autowired
+    private AccountRepository accountRepository;
+
+    @Autowired
     private MemberRepository memberRepository;
 
     @BeforeEach
     void setUp() {
+        accountRepository.deleteAll();
         memberRepository.deleteAll();
     }
 
@@ -228,12 +233,12 @@ class AuthControllerTest extends IntegrationTestBase {
             String accessToken = loginResponse.getAccessToken();
 
             // When & Then: 토큰으로 인증 필요 API 호출 (계좌 목록 조회)
-            // 401(인증 실패)이 아닌 404(인증 성공, 엔드포인트 미구현)가 오면 인증 성공
+            // 401(인증 실패)이 아닌 200(인증 성공)이 오면 인증 성공
             mockMvc.perform(
                             org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                                     .get("/api/v1/accounts")
                                     .header("Authorization", "Bearer " + accessToken))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isOk());
         }
 
         @Test

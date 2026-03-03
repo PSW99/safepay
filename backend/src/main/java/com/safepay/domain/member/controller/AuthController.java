@@ -1,4 +1,4 @@
-package com.safepay.domain.controller;
+package com.safepay.domain.member.controller;
 
 import com.safepay.domain.member.dto.AuthDto.LoginRequest;
 import com.safepay.domain.member.dto.AuthDto.LoginResponse;
