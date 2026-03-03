@@ -2,6 +2,7 @@ package com.safepay.domain.transaction.service;
 
 import com.safepay.domain.account.entity.Account;
 import com.safepay.domain.account.repository.AccountRepository;
+import com.safepay.domain.transaction.dto.TransactionDto;
 import com.safepay.domain.transaction.dto.TransactionDto.DepositRequest;
 import com.safepay.domain.transaction.dto.TransactionDto.TransactionResponse;
 import com.safepay.domain.transaction.entity.Transaction;
@@ -43,6 +44,33 @@ public class TransactionService {
         transactionRepository.save(tx);
 
         log.info("입금 완료: accountId={}, amount={}, balanceAfter={}",
+                accountId, request.getAmount(), account.getBalance());
+
+        return TransactionResponse.from(tx);
+    }
+
+    // 출금 처리
+    @Transactional
+    public TransactionResponse withdraw(Long accountId, Long memberId,
+                                        TransactionDto.WithdrawRequest request, String idempotencyKey) {
+        // 비관적 락으로 계좌 조회
+        Account account = accountRepository.findByIdWithLock(accountId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+
+        // 소유자 검증
+        if (!account.isOwnedBy(memberId)) {
+            throw new CustomException(ErrorCode.ACCOUNT_NOT_OWNER);
+        }
+
+        // 출금 (도메인 로직 — 잔액 부족 시 CustomException 발생)
+        account.withdraw(request.getAmount());
+
+        // 거래 내역 저장
+        Transaction tx = Transaction.createWithdraw(
+                account, request.getAmount(), request.getDescription(), idempotencyKey);
+        transactionRepository.save(tx);
+
+        log.info("출금 완료: accountId={}, amount={}, balanceAfter={}",
                 accountId, request.getAmount(), account.getBalance());
 
         return TransactionResponse.from(tx);
