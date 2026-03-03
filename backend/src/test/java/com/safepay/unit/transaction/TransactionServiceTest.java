@@ -66,6 +66,10 @@ class TransactionServiceTest {
         ReflectionTestUtils.setField(account, "id", ACCOUNT_ID);
     }
 
+    private void depositToAccount(BigDecimal amount) {
+        account.deposit(amount);
+    }
+
     // 입금
     @Nested
     @DisplayName("입금")
@@ -180,6 +184,147 @@ class TransactionServiceTest {
 
             // When & Then: memberId=999 (다른 사람)
             assertThatThrownBy(() -> transactionService.deposit(ACCOUNT_ID, 999L, request, "test-key"))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.ACCOUNT_NOT_OWNER));
+        }
+    }
+
+    // 출금
+    @Nested
+    @DisplayName("출금")
+    class Withdraw {
+
+        @BeforeEach
+        void setUp() {
+            // 잔액 10,000원 세팅
+            depositToAccount(new BigDecimal("10000"));
+        }
+
+        @Test
+        @DisplayName("정상 출금 시 거래 내역을 반환한다")
+        void withdraw_success() {
+            // Given
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("3000"), "테스트 출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.save(any(Transaction.class))).willAnswer(invocation -> {
+                Transaction tx = invocation.getArgument(0);
+                ReflectionTestUtils.setField(tx, "id", 1L);
+                return tx;
+            });
+
+            // When
+            TransactionResponse response = transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key");
+
+            // Then
+            assertThat(response.getType()).isEqualTo("WITHDRAW");
+            assertThat(response.getAmount()).isEqualByComparingTo(new BigDecimal("3000"));
+            assertThat(response.getBalanceAfter()).isEqualByComparingTo(new BigDecimal("7000"));
+            assertThat(response.getStatus()).isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("출금 후 계좌 잔액이 감소한다")
+        void withdraw_balanceDecreases() {
+            // Given
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("3000"), "출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.save(any(Transaction.class))).willAnswer(invocation -> {
+                Transaction tx = invocation.getArgument(0);
+                ReflectionTestUtils.setField(tx, "id", 1L);
+                return tx;
+            });
+
+            // When
+            transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key");
+
+            // Then
+            assertThat(account.getBalance()).isEqualByComparingTo(new BigDecimal("7000"));
+        }
+
+        @Test
+        @DisplayName("잔액보다 많은 금액 출금 시 INSUFFICIENT_BALANCE 예외가 발생한다")
+        void withdraw_insufficientBalance_throwsException() {
+            // Given: 잔액 10,000원인데 10,001원 출금
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("10001"), "초과 출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+            // When & Then
+            assertThatThrownBy(() -> transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key"))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.INSUFFICIENT_BALANCE));
+        }
+
+        @Test
+        @DisplayName("잔액 부족 시 거래 내역이 저장되지 않는다")
+        void withdraw_insufficientBalance_noTransactionSaved() {
+            // Given: 잔액 10,000원인데 10,001원 출금
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("10001"), "초과 출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+            // When
+            try {
+                transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key");
+            } catch (CustomException ignored) {
+            }
+
+            // Then
+            verify(transactionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("잔액 부족 시 계좌 잔액은 변경되지 않는다")
+        void withdraw_insufficientBalance_balanceUnchanged() {
+            // Given: 잔액 10,000원인데 10,001원 출금
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("10001"), "초과 출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+            // When
+            try {
+                transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key");
+            } catch (CustomException ignored) {
+            }
+
+            // Then
+            assertThat(account.getBalance()).isEqualByComparingTo(new BigDecimal("10000"));
+        }
+
+        @Test
+        @DisplayName("잔액 전부 출금하면 잔액이 0원이 된다")
+        void withdraw_allBalance_becomesZero() {
+            // Given: 잔액 10,000원 전액 출금
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("10000"), "전액 출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.save(any(Transaction.class))).willAnswer(invocation -> {
+                Transaction tx = invocation.getArgument(0);
+                ReflectionTestUtils.setField(tx, "id", 1L);
+                return tx;
+            });
+
+            // When
+            transactionService.withdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key");
+
+            // Then
+            assertThat(account.getBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("본인 계좌가 아니면 ACCOUNT_NOT_OWNER 예외가 발생한다")
+        void withdraw_notOwner_throwsException() {
+            // Given
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("1000"), "출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+            // When & Then: memberId=999 (다른 사람)
+            assertThatThrownBy(() -> transactionService.withdraw(ACCOUNT_ID, 999L, request, "test-key"))
                     .isInstanceOf(CustomException.class)
                     .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
                             .isEqualTo(ErrorCode.ACCOUNT_NOT_OWNER));
