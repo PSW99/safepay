@@ -11,6 +11,8 @@ import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -88,6 +90,22 @@ public class TransactionService {
                 accountId, request.getAmount(), account.getBalance());
 
         return TransactionResponse.from(tx);
+    }
+
+    // 거래 내역 조회 (페이징)
+    @Transactional(readOnly = true)
+    public Page<TransactionResponse> getTransactions(Long accountId, Long memberId,
+                                                     Pageable pageable) {
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+
+        if (!account.isOwnedBy(memberId)) {
+            throw new CustomException(ErrorCode.ACCOUNT_NOT_OWNER);
+        }
+
+        return transactionRepository
+                .findByAccountIdOrderByCreatedAtDesc(accountId, pageable)
+                .map(TransactionResponse::from);
     }
 
     // Private

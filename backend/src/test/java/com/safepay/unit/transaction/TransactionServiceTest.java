@@ -18,14 +18,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -345,6 +351,7 @@ class TransactionServiceTest {
                             .isEqualTo(ErrorCode.ACCOUNT_NOT_OWNER));
         }
     }
+
     // 멱등성
     @Nested
     @DisplayName("멱등성 (Idempotency)")
@@ -443,6 +450,77 @@ class TransactionServiceTest {
 
             // Then: 잔액이 2번 증가 (5000 + 5000 = 10000)
             assertThat(account.getBalance()).isEqualByComparingTo(new BigDecimal("10000"));
+        }
+    }
+
+    // 거래 내역 조회
+    @Nested
+    @DisplayName("거래 내역 조회")
+    class GetTransactions {
+
+        @Test
+        @DisplayName("계좌의 거래 내역을 페이징으로 반환한다")
+        void getTransactions_success() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 20);
+            Transaction tx = createSavedTransaction(
+                    "key-1", Transaction.TransactionType.DEPOSIT,
+                    new BigDecimal("10000"), new BigDecimal("10000"));
+
+            given(accountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.findByAccountIdOrderByCreatedAtDesc(eq(ACCOUNT_ID), any(Pageable.class)))
+                    .willReturn(new PageImpl<>(List.of(tx)));
+
+            // When
+            Page<TransactionResponse> result = transactionService.getTransactions(ACCOUNT_ID, MEMBER_ID, pageable);
+
+            // Then
+            assertThat(result.getContent()).hasSize(1);
+            assertThat(result.getContent().get(0).getType()).isEqualTo("DEPOSIT");
+        }
+
+        @Test
+        @DisplayName("거래 내역이 없으면 빈 페이지를 반환한다")
+        void getTransactions_empty() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 20);
+            given(accountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.findByAccountIdOrderByCreatedAtDesc(eq(ACCOUNT_ID), any(Pageable.class)))
+                    .willReturn(Page.empty());
+
+            // When
+            Page<TransactionResponse> result = transactionService.getTransactions(ACCOUNT_ID, MEMBER_ID, pageable);
+
+            // Then
+            assertThat(result.getContent()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 계좌의 거래 내역 조회 시 ACCOUNT_NOT_FOUND 예외")
+        void getTransactions_accountNotFound_throwsException() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 20);
+            given(accountRepository.findById(999L)).willReturn(Optional.empty());
+
+            // When & Then
+            assertThatThrownBy(() -> transactionService.getTransactions(999L, MEMBER_ID, pageable))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND));
+        }
+
+        @Test
+        @DisplayName("본인 계좌가 아니면 ACCOUNT_NOT_OWNER 예외")
+        void getTransactions_notOwner_throwsException() {
+            // Given
+            Pageable pageable = PageRequest.of(0, 20);
+            given(accountRepository.findById(ACCOUNT_ID)).willReturn(Optional.of(account));
+
+            // When & Then
+            assertThatThrownBy(() -> transactionService.getTransactions(ACCOUNT_ID, 999L, pageable))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.ACCOUNT_NOT_OWNER));
         }
     }
 }
