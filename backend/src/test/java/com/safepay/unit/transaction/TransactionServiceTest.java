@@ -370,7 +370,7 @@ class TransactionServiceTest {
                     new BigDecimal("10000"), new BigDecimal("10000"));
 
             // 두 번째 요청: 이미 존재하는 키 → 기존 결과 반환
-            given(transactionRepository.findByIdempotencyKey(sameKey))
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
                     .willReturn(Optional.of(existingTx));
 
             // When
@@ -396,7 +396,7 @@ class TransactionServiceTest {
                     sameKey, Transaction.TransactionType.WITHDRAW,
                     new BigDecimal("5000"), new BigDecimal("5000"));
 
-            given(transactionRepository.findByIdempotencyKey(sameKey))
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
                     .willReturn(Optional.of(existingTx));
 
             // When
@@ -419,7 +419,7 @@ class TransactionServiceTest {
                     sameKey, Transaction.TransactionType.DEPOSIT,
                     new BigDecimal("10000"), new BigDecimal("10000"));
 
-            given(transactionRepository.findByIdempotencyKey(sameKey))
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
                     .willReturn(Optional.of(existingTx));
 
             // When & Then: 예외가 발생하지 않고 정상 응답을 반환
@@ -435,8 +435,8 @@ class TransactionServiceTest {
             String key2 = "key-2";
             DepositRequest request = new DepositRequest(new BigDecimal("5000"), "입금");
 
-            given(transactionRepository.findByIdempotencyKey(key1)).willReturn(Optional.empty());
-            given(transactionRepository.findByIdempotencyKey(key2)).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, key1)).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, key2)).willReturn(Optional.empty());
             given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
             given(transactionRepository.save(any(Transaction.class))).willAnswer(invocation -> {
                 Transaction tx = invocation.getArgument(0);

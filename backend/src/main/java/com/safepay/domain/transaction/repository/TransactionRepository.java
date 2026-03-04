@@ -11,5 +11,5 @@ import java.util.Optional;
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
     Page<Transaction> findByAccountIdOrderByCreatedAtDesc(Long accountId, Pageable pageable);
 
-    Optional<Transaction> findByIdempotencyKey(String idempotencyKey);
+    Optional<Transaction> findByAccountIdAndIdempotencyKey(Long accountId, String idempotencyKey);
 }

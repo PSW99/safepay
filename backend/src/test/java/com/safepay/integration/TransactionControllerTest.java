@@ -178,6 +178,20 @@ class TransactionControllerTest extends IntegrationTestBase {
         }
 
         @Test
+        @DisplayName("Idempotency-Key가 UUID 형식이 아니면 400을 반환한다")
+        void deposit_invalidIdempotencyKey_returns400() throws Exception {
+            DepositRequest request = new DepositRequest(new BigDecimal("10000"), "입금");
+
+            mockMvc.perform(post("/api/v1/accounts/{id}/deposit", accountId)
+                            .header("Authorization", "Bearer " + accessToken)
+                            .header("Idempotency-Key", "not-a-valid-uuid")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("TX_005"));
+        }
+
+        @Test
         @DisplayName("금액이 0 이하면 400을 반환한다")
         void deposit_invalidAmount_returns400() throws Exception {
             DepositRequest request = new DepositRequest(new BigDecimal("0"), "0원 입금");

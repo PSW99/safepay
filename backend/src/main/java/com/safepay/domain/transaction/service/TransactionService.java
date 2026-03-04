@@ -11,6 +11,7 @@ import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -29,7 +30,7 @@ public class TransactionService {
     public TransactionResponse deposit(Long accountId, Long memberId,
                                        DepositRequest request, String idempotencyKey) {
         // 멱등성 체크
-        TransactionResponse existing = checkIdempotency(idempotencyKey);
+        TransactionResponse existing = checkIdempotency(accountId, idempotencyKey);
         if (existing != null) {
             log.info("중복 입금 요청 감지: idempotencyKey={}", idempotencyKey);
             return existing;
@@ -50,7 +51,14 @@ public class TransactionService {
         // 거래 내역 저장
         Transaction tx = Transaction.createDeposit(
                 account, request.getAmount(), request.getDescription(), idempotencyKey);
-        transactionRepository.save(tx);
+        try {
+            transactionRepository.save(tx);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("멱등성 키 중복 (동시 요청): idempotencyKey={}", idempotencyKey);
+            return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
+                    .map(TransactionResponse::from)
+                    .orElseThrow(() -> new CustomException(ErrorCode.DUPLICATE_TRANSACTION));
+        }
 
         log.info("입금 완료: accountId={}, amount={}, balanceAfter={}",
                 accountId, request.getAmount(), account.getBalance());
@@ -63,7 +71,7 @@ public class TransactionService {
     public TransactionResponse withdraw(Long accountId, Long memberId,
                                         TransactionDto.WithdrawRequest request, String idempotencyKey) {
         // 멱등성 체크
-        TransactionResponse existing = checkIdempotency(idempotencyKey);
+        TransactionResponse existing = checkIdempotency(accountId, idempotencyKey);
         if (existing != null) {
             log.info("중복 출금 요청 감지: idempotencyKey={}", idempotencyKey);
             return existing;
@@ -84,7 +92,14 @@ public class TransactionService {
         // 거래 내역 저장
         Transaction tx = Transaction.createWithdraw(
                 account, request.getAmount(), request.getDescription(), idempotencyKey);
-        transactionRepository.save(tx);
+        try {
+            transactionRepository.save(tx);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("멱등성 키 중복 (동시 요청): idempotencyKey={}", idempotencyKey);
+            return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
+                    .map(TransactionResponse::from)
+                    .orElseThrow(() -> new CustomException(ErrorCode.DUPLICATE_TRANSACTION));
+        }
 
         log.info("출금 완료: accountId={}, amount={}, balanceAfter={}",
                 accountId, request.getAmount(), account.getBalance());
@@ -109,8 +124,8 @@ public class TransactionService {
     }
 
     // Private
-    private TransactionResponse checkIdempotency(String idempotencyKey) {
-        return transactionRepository.findByIdempotencyKey(idempotencyKey)
+    private TransactionResponse checkIdempotency(Long accountId, String idempotencyKey) {
+        return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
                 .map(TransactionResponse::from)
                 .orElse(null);
     }

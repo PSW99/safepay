@@ -5,6 +5,8 @@ import com.safepay.domain.transaction.dto.TransactionDto.TransactionResponse;
 import com.safepay.domain.transaction.dto.TransactionDto.WithdrawRequest;
 import com.safepay.domain.transaction.service.TransactionService;
 import com.safepay.global.security.CustomUserPrincipal;
+import com.safepay.global.exception.CustomException;
+import com.safepay.global.exception.ErrorCode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,6 +19,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
 
 @Tag(name = "Transaction", description = "거래(입금/출금) API")
 @RestController
@@ -35,6 +39,7 @@ public class TransactionController {
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody DepositRequest request) {
 
+        validateIdempotencyKey(idempotencyKey);
         TransactionResponse response = transactionService.deposit(
                 accountId, principal.getMemberId(), request, idempotencyKey);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
@@ -49,9 +54,18 @@ public class TransactionController {
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody WithdrawRequest request) {
 
+        validateIdempotencyKey(idempotencyKey);
         TransactionResponse response = transactionService.withdraw(
                 accountId, principal.getMemberId(), request, idempotencyKey);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    private void validateIdempotencyKey(String idempotencyKey) {
+        try {
+            UUID.fromString(idempotencyKey);
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(ErrorCode.INVALID_IDEMPOTENCY_KEY);
+        }
     }
 
     @Operation(summary = "거래 내역 조회")

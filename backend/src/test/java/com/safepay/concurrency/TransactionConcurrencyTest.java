@@ -90,7 +90,9 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
         int threadCount = 10;
         BigDecimal withdrawAmount = new BigDecimal("1000");
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch latch = new CountDownLatch(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failCount = new AtomicInteger(0);
 
@@ -99,6 +101,8 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
             final int idx = i;
             executor.submit(() -> {
                 try {
+                    readyLatch.countDown();
+                    startLatch.await();
                     transactionService.withdraw(
                             accountId, memberId,
                             new WithdrawRequest(withdrawAmount, "동시 출금 " + idx),
@@ -108,11 +112,13 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
                 } catch (Exception e) {
                     failCount.incrementAndGet();
                 } finally {
-                    latch.countDown();
+                    doneLatch.countDown();
                 }
             });
         }
-        latch.await(10, TimeUnit.SECONDS);
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown();
+        doneLatch.await(10, TimeUnit.SECONDS);
         executor.shutdown();
 
         // Then: 잔액은 정확히 0원이어야 함 (10,000 - 1,000 * 10 = 0)
@@ -136,7 +142,9 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
                 UUID.randomUUID().toString());
 
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch latch = new CountDownLatch(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failCount = new AtomicInteger(0);
 
@@ -145,6 +153,8 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
             final int idx = i;
             executor.submit(() -> {
                 try {
+                    readyLatch.countDown();
+                    startLatch.await();
                     transactionService.withdraw(
                             accountId, memberId,
                             new WithdrawRequest(withdrawAmount, "동시 출금 " + idx),
@@ -154,11 +164,13 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
                 } catch (Exception e) {
                     failCount.incrementAndGet();
                 } finally {
-                    latch.countDown();
+                    doneLatch.countDown();
                 }
             });
         }
-        latch.await(10, TimeUnit.SECONDS);
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown();
+        doneLatch.await(10, TimeUnit.SECONDS);
         executor.shutdown();
 
         // Then: 잔액은 0 이상이어야 하고, 성공 5개 + 실패 5개
@@ -175,7 +187,9 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
         int threadCount = 10;
         BigDecimal depositAmount = new BigDecimal("1000");
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch latch = new CountDownLatch(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
         AtomicInteger successCount = new AtomicInteger(0);
 
         // When
@@ -183,6 +197,8 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
             final int idx = i;
             executor.submit(() -> {
                 try {
+                    readyLatch.countDown();
+                    startLatch.await();
                     transactionService.deposit(
                             accountId, memberId,
                             new DepositRequest(depositAmount, "동시 입금 " + idx),
@@ -192,11 +208,13 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
                 } catch (Exception e) {
                     // 입금은 실패하지 않아야 함
                 } finally {
-                    latch.countDown();
+                    doneLatch.countDown();
                 }
             });
         }
-        latch.await(10, TimeUnit.SECONDS);
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown();
+        doneLatch.await(10, TimeUnit.SECONDS);
         executor.shutdown();
 
         // Then: 잔액은 정확히 20,000원 (10,000 + 1,000 * 10)
@@ -214,7 +232,9 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
         // 결과: 10,000원 유지
         int threadCount = 10;
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        CountDownLatch latch = new CountDownLatch(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
         AtomicInteger successCount = new AtomicInteger(0);
 
         // When
@@ -222,6 +242,8 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
             final int idx = i;
             executor.submit(() -> {
                 try {
+                    readyLatch.countDown();
+                    startLatch.await();
                     if (idx < 5) {
                         // 입금
                         transactionService.deposit(
@@ -241,11 +263,13 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
                 } catch (Exception e) {
                     // ignore
                 } finally {
-                    latch.countDown();
+                    doneLatch.countDown();
                 }
             });
         }
-        latch.await(10, TimeUnit.SECONDS);
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown();
+        doneLatch.await(10, TimeUnit.SECONDS);
         executor.shutdown();
 
         // Then: 잔액은 정확히 10,000원 (입금 5,000 - 출금 5,000 = 변동 없음)
