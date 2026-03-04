@@ -54,10 +54,7 @@ public class TransactionService {
         try {
             transactionRepository.save(tx);
         } catch (DataIntegrityViolationException e) {
-            log.warn("멱등성 키 중복 (동시 요청): idempotencyKey={}", idempotencyKey);
-            return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
-                    .map(TransactionResponse::from)
-                    .orElseThrow(() -> new CustomException(ErrorCode.DUPLICATE_TRANSACTION));
+            throw new CustomException(ErrorCode.DUPLICATE_TRANSACTION);
         }
 
         log.info("입금 완료: accountId={}, amount={}, balanceAfter={}",
@@ -95,10 +92,7 @@ public class TransactionService {
         try {
             transactionRepository.save(tx);
         } catch (DataIntegrityViolationException e) {
-            log.warn("멱등성 키 중복 (동시 요청): idempotencyKey={}", idempotencyKey);
-            return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
-                    .map(TransactionResponse::from)
-                    .orElseThrow(() -> new CustomException(ErrorCode.DUPLICATE_TRANSACTION));
+            throw new CustomException(ErrorCode.DUPLICATE_TRANSACTION);
         }
 
         log.info("출금 완료: accountId={}, amount={}, balanceAfter={}",

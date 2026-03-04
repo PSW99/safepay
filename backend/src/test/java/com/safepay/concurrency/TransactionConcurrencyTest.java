@@ -277,4 +277,102 @@ class TransactionConcurrencyTest extends ConcurrencyTestBase {
         assertThat(result.getBalance()).isEqualByComparingTo(new BigDecimal("10000"));
         assertThat(successCount.get()).isEqualTo(10);
     }
+
+    @Test
+    @DisplayName("동일 멱등성 키로 동시 입금 시 잔액이 1번만 반영된다 (이중 반영 방지)")
+    void concurrentDeposit_sameIdempotencyKey_balanceChangedOnce() throws Exception {
+        // Given: 잔액 10,000원, 2개 스레드가 동일 키로 5,000원 입금
+        int threadCount = 2;
+        String sameKey = UUID.randomUUID().toString();
+        BigDecimal depositAmount = new BigDecimal("5000");
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger failCount = new AtomicInteger(0);
+
+        // When: 2개 스레드가 동일 멱등성 키로 동시 입금
+        for (int i = 0; i < threadCount; i++) {
+            final int idx = i;
+            executor.submit(() -> {
+                try {
+                    readyLatch.countDown();
+                    startLatch.await();
+                    transactionService.deposit(
+                            accountId, memberId,
+                            new DepositRequest(depositAmount, "동시 입금 " + idx),
+                            sameKey
+                    );
+                    successCount.incrementAndGet();
+                } catch (Exception e) {
+                    failCount.incrementAndGet();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown();
+        doneLatch.await(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        // Then: 1개 성공, 1개 실패 (DUPLICATE_TRANSACTION)
+        // 잔액은 15,000원 — 이중 반영 없음 (10,000 + 5,000 × 1회)
+        Account result = accountRepository.findById(accountId).orElseThrow();
+        assertThat(result.getBalance())
+                .as("동일 멱등성 키로 동시 입금 시 잔액은 1번만 반영되어야 한다")
+                .isEqualByComparingTo(new BigDecimal("15000"));
+        assertThat(successCount.get()).isEqualTo(1);
+        assertThat(failCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("동일 멱등성 키로 동시 출금 시 잔액이 1번만 차감된다 (이중 차감 방지)")
+    void concurrentWithdraw_sameIdempotencyKey_balanceChangedOnce() throws Exception {
+        // Given: 잔액 10,000원, 2개 스레드가 동일 키로 3,000원 출금
+        int threadCount = 2;
+        String sameKey = UUID.randomUUID().toString();
+        BigDecimal withdrawAmount = new BigDecimal("3000");
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger failCount = new AtomicInteger(0);
+
+        // When: 2개 스레드가 동일 멱등성 키로 동시 출금
+        for (int i = 0; i < threadCount; i++) {
+            final int idx = i;
+            executor.submit(() -> {
+                try {
+                    readyLatch.countDown();
+                    startLatch.await();
+                    transactionService.withdraw(
+                            accountId, memberId,
+                            new WithdrawRequest(withdrawAmount, "동시 출금 " + idx),
+                            sameKey
+                    );
+                    successCount.incrementAndGet();
+                } catch (Exception e) {
+                    failCount.incrementAndGet();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+        readyLatch.await(5, TimeUnit.SECONDS);
+        startLatch.countDown();
+        doneLatch.await(10, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        // Then: 1개 성공, 1개 실패 (DUPLICATE_TRANSACTION)
+        // 잔액은 7,000원 — 이중 차감 없음 (10,000 - 3,000 × 1회)
+        Account result = accountRepository.findById(accountId).orElseThrow();
+        assertThat(result.getBalance())
+                .as("동일 멱등성 키로 동시 출금 시 잔액은 1번만 차감되어야 한다")
+                .isEqualByComparingTo(new BigDecimal("7000"));
+        assertThat(successCount.get()).isEqualTo(1);
+        assertThat(failCount.get()).isEqualTo(1);
+    }
 }
