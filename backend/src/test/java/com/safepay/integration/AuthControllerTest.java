@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safepay.domain.account.repository.AccountRepository;
 import com.safepay.domain.member.dto.AuthDto.*;
 import com.safepay.domain.member.repository.MemberRepository;
+import com.safepay.domain.transaction.repository.TransactionRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -26,6 +27,9 @@ class AuthControllerTest extends IntegrationTestBase {
     private ObjectMapper objectMapper;
 
     @Autowired
+    private TransactionRepository transactionRepository;
+
+    @Autowired
     private AccountRepository accountRepository;
 
     @Autowired
@@ -33,6 +37,7 @@ class AuthControllerTest extends IntegrationTestBase {
 
     @BeforeEach
     void setUp() {
+        transactionRepository.deleteAll();
         accountRepository.deleteAll();
         memberRepository.deleteAll();
     }

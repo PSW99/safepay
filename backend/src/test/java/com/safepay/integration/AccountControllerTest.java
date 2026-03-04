@@ -6,6 +6,7 @@ import com.safepay.domain.account.entity.Account;
 import com.safepay.domain.account.repository.AccountRepository;
 import com.safepay.domain.member.dto.AuthDto.*;
 import com.safepay.domain.member.repository.MemberRepository;
+import com.safepay.domain.transaction.repository.TransactionRepository;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -35,10 +36,14 @@ class AccountControllerTest extends IntegrationTestBase {
     @Autowired
     private AccountRepository accountRepository;
 
+    @Autowired
+    private TransactionRepository transactionRepository;
+
     private String accessToken;
 
     @BeforeEach
     void setUp() throws Exception {
+        transactionRepository.deleteAll();
         accountRepository.deleteAll();
         memberRepository.deleteAll();
 

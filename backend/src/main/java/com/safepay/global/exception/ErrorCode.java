@@ -24,6 +24,7 @@ public enum ErrorCode {
     DUPLICATE_TRANSACTION(HttpStatus.CONFLICT, "TX_002", "이미 처리된 요청입니다"),
     CONCURRENCY_CONFLICT(HttpStatus.CONFLICT, "TX_003", "동시 요청 충돌이 발생했습니다. 잠시 후 재시도해주세요"),
     INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "TX_004", "유효하지 않은 금액입니다"),
+    INVALID_IDEMPOTENCY_KEY(HttpStatus.BAD_REQUEST, "TX_005", "Idempotency-Key는 UUID v4 형식이어야 합니다"),
 
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다"),

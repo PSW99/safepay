@@ -51,5 +51,5 @@ CREATE TABLE transaction (
     CONSTRAINT chk_amount_positive CHECK (amount > 0),
     INDEX idx_transaction_account_id (account_id),
     INDEX idx_transaction_created_at (created_at),
-    INDEX idx_transaction_idempotency (idempotency_key)
+    INDEX idx_transaction_account_idempotency (account_id, idempotency_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
