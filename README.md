@@ -11,7 +11,7 @@
 | Language | Java 17 |
 | Framework | Spring Boot 3.2.3, Spring Security, Spring Data JPA |
 | Database | MySQL 8.0 (InnoDB) |
-| Auth | JWT (jjwt, BCrypt |
+| Auth | JWT (jjwt, BCrypt) |
 | Encryption | AES-256-GCM |
 | Infra | Docker Compose, GitHub Actions CI |
 | Test | JUnit 5, Mockito, Testcontainers, AssertJ |
@@ -199,4 +199,7 @@ backend/src/main/java/com/safepay/
 | [ADR-002 멱등성 설계](https://github.com/PSW99/SafePay/wiki/ADR-002-멱등성-설계) | Idempotency Key 구현 방식 선택 |
 | [ADR-003 암호화 전략](https://github.com/PSW99/SafePay/wiki/ADR-003-암호화-전략) | AES-256-GCM, BCrypt 선택 근거 |
 | [ADR-004 인증 방식](https://github.com/PSW99/SafePay/wiki/ADR-004-인증-방식) | JWT Stateless 인증 설계 |
+| [ADR-005 에러 처리 전략](https://github.com/PSW99/safepay/wiki/ADR%E2%80%90005-%EC%97%90%EB%9F%AC-%EC%B2%98%EB%A6%AC-%EB%B0%8F-%EC%97%90%EB%9F%AC-%EC%BD%94%EB%93%9C-%EC%B2%B4%EA%B3%84) | JWT Stateless 인증 설계 |
 | [Troubleshooting-001](https://github.com/PSW99/SafePay/wiki/Troubleshooting-001-통합테스트-실패) | Testcontainers 싱글턴 컨테이너 패턴 |
+| [Troubleshooting-002](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90002:-%EB%A9%B1%EB%93%B1%EC%84%B1-%ED%82%A4-%EB%8F%99%EC%8B%9C-%EC%9A%94%EC%B2%AD-%EC%8B%9C-Hibernate-%EC%84%B8%EC%85%98-%EA%B9%A8%EC%A7%90) | 멱등성 키 동시 요청 시 Hibernate 세션 깨짐 |
+
