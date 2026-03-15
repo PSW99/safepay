@@ -2,16 +2,14 @@ package com.safepay.domain.transaction.service;
 
 import com.safepay.domain.account.entity.Account;
 import com.safepay.domain.account.repository.AccountRepository;
-import com.safepay.domain.transaction.dto.TransactionDto;
-import com.safepay.domain.transaction.dto.TransactionDto.DepositRequest;
-import com.safepay.domain.transaction.dto.TransactionDto.TransactionResponse;
-import com.safepay.domain.transaction.entity.Transaction;
+import com.safepay.domain.transaction.dto.TransactionDto.*;
 import com.safepay.domain.transaction.repository.TransactionRepository;
 import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
+import com.safepay.global.util.DistributedLockManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.redisson.api.RLock;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -24,84 +22,48 @@ public class TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final AccountRepository accountRepository;
+    private final DistributedLockManager distributedLockManager;
+    private final TransactionExecutor transactionExecutor;
 
     // 입금 처리
-    @Transactional
     public TransactionResponse deposit(Long accountId, Long memberId,
                                        DepositRequest request, String idempotencyKey) {
-        // 멱등성 체크
-        TransactionResponse existing = checkIdempotency(accountId, idempotencyKey);
+        // 멱등성 체크 (락 바깥에서 — 이미 처리된 요청은 빠르게 반환)
+        TransactionResponse existing = checkIdempotency(idempotencyKey);
         if (existing != null) {
             log.info("중복 입금 요청 감지: idempotencyKey={}", idempotencyKey);
             return existing;
         }
 
-        // 비관적 락으로 계좌 조회
-        Account account = accountRepository.findByIdWithLock(accountId)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
-
-        // 소유자 검증
-        if (!account.isOwnedBy(memberId)) {
-            throw new CustomException(ErrorCode.ACCOUNT_NOT_OWNER);
-        }
-
-        // 입금 (도메인 로직 — Account.deposit())
-        account.deposit(request.getAmount());
-
-        // 거래 내역 저장
-        Transaction tx = Transaction.createDeposit(
-                account, request.getAmount(), request.getDescription(), idempotencyKey);
+        // 분산 락 획득 (Redis 장애 시 null → 비관적 락만으로 진행)
+        RLock lock = distributedLockManager.tryLockOrNull(accountId);
         try {
-            transactionRepository.save(tx);
-        } catch (DataIntegrityViolationException e) {
-            throw new CustomException(ErrorCode.DUPLICATE_TRANSACTION);
+            return transactionExecutor.executeDeposit(accountId, memberId, request, idempotencyKey);
+        } finally {
+            distributedLockManager.unlock(lock);
         }
-
-        log.info("입금 완료: accountId={}, amount={}, balanceAfter={}",
-                accountId, request.getAmount(), account.getBalance());
-
-        return TransactionResponse.from(tx);
     }
 
     // 출금 처리
-    @Transactional
     public TransactionResponse withdraw(Long accountId, Long memberId,
-                                        TransactionDto.WithdrawRequest request, String idempotencyKey) {
+                                        WithdrawRequest request, String idempotencyKey) {
         // 멱등성 체크
-        TransactionResponse existing = checkIdempotency(accountId, idempotencyKey);
+        TransactionResponse existing = checkIdempotency(idempotencyKey);
         if (existing != null) {
             log.info("중복 출금 요청 감지: idempotencyKey={}", idempotencyKey);
             return existing;
         }
 
-        // 비관적 락으로 계좌 조회
-        Account account = accountRepository.findByIdWithLock(accountId)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
-
-        // 소유자 검증
-        if (!account.isOwnedBy(memberId)) {
-            throw new CustomException(ErrorCode.ACCOUNT_NOT_OWNER);
-        }
-
-        // 출금 (도메인 로직 — 잔액 부족 시 CustomException 발생)
-        account.withdraw(request.getAmount());
-
-        // 거래 내역 저장
-        Transaction tx = Transaction.createWithdraw(
-                account, request.getAmount(), request.getDescription(), idempotencyKey);
+        // 분산 락 획득
+        RLock lock = distributedLockManager.tryLockOrNull(accountId);
         try {
-            transactionRepository.save(tx);
-        } catch (DataIntegrityViolationException e) {
-            throw new CustomException(ErrorCode.DUPLICATE_TRANSACTION);
+            return transactionExecutor.executeWithdraw(accountId, memberId, request, idempotencyKey);
+        } finally {
+            distributedLockManager.unlock(lock);
         }
-
-        log.info("출금 완료: accountId={}, amount={}, balanceAfter={}",
-                accountId, request.getAmount(), account.getBalance());
-
-        return TransactionResponse.from(tx);
     }
 
-    // 거래 내역 조회 (페이징)
+    //거래 내역 조회 (페이징) — 분산 락 불필요 (읽기 전용)
     @Transactional(readOnly = true)
     public Page<TransactionResponse> getTransactions(Long accountId, Long memberId,
                                                      Pageable pageable) {
@@ -117,9 +79,9 @@ public class TransactionService {
                 .map(TransactionResponse::from);
     }
 
-    // Private
-    private TransactionResponse checkIdempotency(Long accountId, String idempotencyKey) {
-        return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
+    // ─── Private ───
+    private TransactionResponse checkIdempotency(String idempotencyKey) {
+        return transactionRepository.findByIdempotencyKey(idempotencyKey)
                 .map(TransactionResponse::from)
                 .orElse(null);
     }
