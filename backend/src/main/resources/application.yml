@@ -37,6 +37,12 @@ jwt:
   access-token-expiry: 1800000    # 30분
   refresh-token-expiry: 604800000 # 7일
 
+# Distributed Lock
+distributed-lock:
+  key-prefix: "safepay:lock:account:"
+  wait-time: 3      # 락 획득 대기 시간 (초)
+  lease-time: 5      # 락 자동 해제 시간 (초)
+
 # Encryption
 encryption:
   aes-key: ${AES_SECRET_KEY}
