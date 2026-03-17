@@ -24,8 +24,10 @@ import java.math.BigDecimal;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("Transaction 동시성 테스트 (분산 락 + 비관적 락)")
 class TransactionConcurrencyTest extends IntegrationTestBase {
@@ -273,15 +275,40 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
 
         @Test
         @DisplayName("분산 락이 Redis에 실제로 생성되고 해제된다")
-        void distributedLock_createdAndReleased() {
-            // When: 입금 요청 (분산 락 획득 → 처리 → 해제)
+        void distributedLock_createdAndReleased() throws Exception {
+            // Given: 락 키 확인용
+            String lockKey = "safepay:lock:account:" + accountId;
+            CountDownLatch lockAcquired = new CountDownLatch(1);
+            CountDownLatch canRelease = new CountDownLatch(1);
+
+            // When: 별도 스레드에서 직접 락을 잡아 거래 중 락이 존재함을 증명
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            Future<Boolean> lockHeldDuringTransaction = executor.submit(() -> {
+                RLock manualLock = redissonClient.getLock(lockKey);
+                manualLock.lock();
+                lockAcquired.countDown();
+                canRelease.await(5, TimeUnit.SECONDS);
+                boolean wasLocked = manualLock.isLocked();
+                manualLock.unlock();
+                return wasLocked;
+            });
+
+            lockAcquired.await(5, TimeUnit.SECONDS);
+
+            // Then: 락이 실제로 잡혀 있는 동안 Redis에서 확인
+            RLock lock = redissonClient.getLock(lockKey);
+            assertThat(lock.isLocked()).isTrue();
+
+            canRelease.countDown();
+            assertThat(lockHeldDuringTransaction.get(5, TimeUnit.SECONDS)).isTrue();
+            executor.shutdown();
+
+            // 락 해제 후 거래 정상 처리 가능
             transactionService.deposit(accountId, memberId,
                     new DepositRequest(new BigDecimal("1000"), "락 확인"),
                     UUID.randomUUID().toString());
 
-            // Then: 거래 완료 후 락이 해제되어 있어야 함
-            String lockKey = "safepay:lock:account:" + accountId;
-            RLock lock = redissonClient.getLock(lockKey);
+            // 거래 완료 후 락이 해제되어 있어야 함
             assertThat(lock.isLocked()).isFalse();
         }
 
@@ -384,16 +411,55 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
         }
 
         @Test
+        @DisplayName("서로 다른 계좌가 같은 멱등성 키를 사용해도 각각 독립 처리된다")
+        void crossAccount_sameIdempotencyKey_processedIndependently() {
+            // Given: 두 번째 계좌 생성
+            Member member2 = Member.builder()
+                    .email("cross@safepay.com")
+                    .password(passwordEncoder.encode("password123"))
+                    .name("교차테스트")
+                    .phone(aesEncryptor.encrypt("010-2222-2222"))
+                    .build();
+            member2 = memberRepository.save(member2);
+
+            Account account2 = Account.builder()
+                    .member(member2)
+                    .accountNumber(aesEncryptor.encrypt("100-01-222222-2"))
+                    .accountType(Account.AccountType.CHECKING)
+                    .build();
+            account2 = accountRepository.save(account2);
+            Long account2Id = account2.getId();
+            Long member2Id = member2.getId();
+
+            String sameKey = UUID.randomUUID().toString();
+
+            // When: 계좌 A에서 키 "abc"로 입금
+            transactionService.deposit(accountId, memberId,
+                    new DepositRequest(new BigDecimal("1000"), "계좌A 입금"),
+                    sameKey);
+
+            // 계좌 B에서 동일한 키 "abc"로 입금 → dedupe되지 않고 별도 처리
+            transactionService.deposit(account2Id, member2Id,
+                    new DepositRequest(new BigDecimal("2000"), "계좌B 입금"),
+                    sameKey);
+
+            // Then: 각 계좌에 각각 금액이 반영되어야 함
+            Account resultA = accountRepository.findById(accountId).orElseThrow();
+            Account resultB = accountRepository.findById(account2Id).orElseThrow();
+            assertThat(resultA.getBalance()).isEqualByComparingTo(new BigDecimal("11000")); // 10000 + 1000
+            assertThat(resultB.getBalance()).isEqualByComparingTo(new BigDecimal("2000"));  // 0 + 2000
+        }
+
+        @Test
         @DisplayName("예외 발생 시 분산 락이 정상 해제된다")
         void exception_lockIsReleased() {
-            // Given: 잔액 부족 출금 시도 (예외 발생)
-            try {
-                transactionService.withdraw(accountId, memberId,
-                        new WithdrawRequest(new BigDecimal("99999"), "잔액 부족"),
-                        UUID.randomUUID().toString());
-            } catch (CustomException e) {
-                assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INSUFFICIENT_BALANCE);
-            }
+            // When & Then: 예외가 반드시 발생해야 함
+            assertThatThrownBy(() -> transactionService.withdraw(accountId, memberId,
+                    new WithdrawRequest(new BigDecimal("99999"), "잔액 부족"),
+                    UUID.randomUUID().toString()))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.INSUFFICIENT_BALANCE));
 
             // Then: 예외가 발생해도 락은 해제되어야 함
             String lockKey = "safepay:lock:account:" + accountId;
