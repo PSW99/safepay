@@ -9,6 +9,7 @@ import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +35,11 @@ public class TransactionExecutor {
 
         Transaction tx = Transaction.createDeposit(
                 account, request.getAmount(), request.getDescription(), idempotencyKey);
-        transactionRepository.save(tx);
+        try {
+            transactionRepository.save(tx);
+        } catch (DataIntegrityViolationException e) {
+            throw new CustomException(ErrorCode.DUPLICATE_TRANSACTION);
+        }
 
         log.info("입금 완료: accountId={}, amount={}, balanceAfter={}",
                 accountId, request.getAmount(), account.getBalance());
@@ -56,7 +61,11 @@ public class TransactionExecutor {
 
         Transaction tx = Transaction.createWithdraw(
                 account, request.getAmount(), request.getDescription(), idempotencyKey);
-        transactionRepository.save(tx);
+        try {
+            transactionRepository.save(tx);
+        } catch (DataIntegrityViolationException e) {
+            throw new CustomException(ErrorCode.DUPLICATE_TRANSACTION);
+        }
 
         log.info("출금 완료: accountId={}, amount={}, balanceAfter={}",
                 accountId, request.getAmount(), account.getBalance());

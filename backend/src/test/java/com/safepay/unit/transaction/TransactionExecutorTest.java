@@ -10,6 +10,7 @@ import com.safepay.domain.transaction.service.TransactionExecutor;
 import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -174,6 +175,23 @@ class TransactionExecutorTest {
         }
 
         @Test
+        @DisplayName("중복 idempotencyKey로 저장 시 DUPLICATE_TRANSACTION 예외가 발생한다")
+        void deposit_duplicateKey_throwsDuplicateTransaction() {
+            // Given
+            DepositRequest request = new DepositRequest(new BigDecimal("10000"), "입금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.save(any(Transaction.class)))
+                    .willThrow(new DataIntegrityViolationException("Duplicate entry for idempotency_key"));
+
+            // When & Then
+            assertThatThrownBy(() -> transactionExecutor.executeDeposit(ACCOUNT_ID, MEMBER_ID, request, "duplicate-key"))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.DUPLICATE_TRANSACTION));
+        }
+
+        @Test
         @DisplayName("본인 계좌가 아니면 ACCOUNT_NOT_OWNER 예외가 발생한다")
         void deposit_notOwner_throwsException() {
             // Given
@@ -311,6 +329,23 @@ class TransactionExecutorTest {
 
             // Then
             assertThat(account.getBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("중복 idempotencyKey로 저장 시 DUPLICATE_TRANSACTION 예외가 발생한다")
+        void withdraw_duplicateKey_throwsDuplicateTransaction() {
+            // Given
+            WithdrawRequest request = new WithdrawRequest(new BigDecimal("3000"), "출금");
+
+            given(accountRepository.findByIdWithLock(ACCOUNT_ID)).willReturn(Optional.of(account));
+            given(transactionRepository.save(any(Transaction.class)))
+                    .willThrow(new DataIntegrityViolationException("Duplicate entry for idempotency_key"));
+
+            // When & Then
+            assertThatThrownBy(() -> transactionExecutor.executeWithdraw(ACCOUNT_ID, MEMBER_ID, request, "duplicate-key"))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.DUPLICATE_TRANSACTION));
         }
 
         @Test
