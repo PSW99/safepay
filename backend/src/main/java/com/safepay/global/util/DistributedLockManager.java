@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.RedisException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -74,10 +75,7 @@ public class DistributedLockManager {
     public RLock tryLockOrNull(Long accountId) {
         try {
             return lock(accountId);
-        } catch (Exception e) {
-            if (e instanceof CustomException) {
-                throw (CustomException) e;
-            }
+        } catch (RedisException e) {
             log.warn("Redis 분산 락 사용 불가, 비관적 락만으로 진행: accountId={}, error={}",
                     accountId, e.getMessage());
             return null;

@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.RedisConnectionException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.concurrent.TimeUnit;
@@ -167,15 +168,27 @@ class DistributedLockManagerTest {
         @Test
         @DisplayName("Redis 연결 실패 시 null을 반환한다 (비관적 락만으로 진행)")
         void tryLockOrNull_redisDown_returnsNull() {
-            // Given: Redis 연결 자체가 실패
+            // Given: Redis 연결 자체가 실패 (인프라 예외)
             given(redissonClient.getLock(anyString()))
-                    .willThrow(new RuntimeException("Redis connection refused"));
+                    .willThrow(new RedisConnectionException("Redis connection refused"));
 
             // When
             RLock result = lockManager.tryLockOrNull(1L);
 
             // Then: null 반환 (폴백 — 비관적 락만으로 동작)
             assertThat(result).isNull();
+        }
+
+        @Test
+        @DisplayName("코드 오류(비인프라 예외)는 그대로 전파한다")
+        void tryLockOrNull_unexpectedException_propagates() {
+            // Given: 인프라 장애가 아닌 코드 버그
+            given(redissonClient.getLock(anyString()))
+                    .willThrow(new NullPointerException("unexpected null"));
+
+            // When & Then: 폴백하지 않고 그대로 전파
+            assertThatThrownBy(() -> lockManager.tryLockOrNull(1L))
+                    .isInstanceOf(NullPointerException.class);
         }
 
         @Test
