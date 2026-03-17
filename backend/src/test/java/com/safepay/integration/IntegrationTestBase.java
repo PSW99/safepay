@@ -1,6 +1,7 @@
 package com.safepay.integration;
 
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -8,6 +9,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest
+@ActiveProfiles("test")
 public abstract class IntegrationTestBase {
 
     static final MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")

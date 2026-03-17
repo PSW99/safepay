@@ -17,13 +17,6 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
     open-in-view: false
 
-  # Redis 비활성화
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
-      - org.redisson.spring.starter.RedissonAutoConfigurationV2
-
 # JWT
 jwt:
   secret: safepay-test-jwt-secret-key-must-be-at-least-256-bits-long-for-hmac-sha
@@ -33,6 +26,12 @@ jwt:
 # Encryption
 encryption:
   aes-key: safepay-test-aes-256-key!!-padding
+
+# Distributed Lock
+distributed-lock:
+  key-prefix: "safepay:lock:account:"
+  wait-time: 3
+  lease-time: 5
 
 # Logging
 logging:
