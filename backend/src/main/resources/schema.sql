@@ -43,7 +43,7 @@ CREATE TABLE transaction (
     amount          DECIMAL(15, 2)  NOT NULL,
     balance_after   DECIMAL(15, 2)  NOT NULL,
     description     VARCHAR(255)    NULL,
-    idempotency_key VARCHAR(36)     NOT NULL UNIQUE COMMENT 'UUID v4 for idempotency',
+    idempotency_key VARCHAR(36)     NOT NULL COMMENT 'UUID v4 for idempotency',
     status          ENUM('SUCCESS', 'FAILED', 'PENDING') NOT NULL DEFAULT 'SUCCESS',
     created_at      DATETIME(6)     NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
 
@@ -51,5 +51,5 @@ CREATE TABLE transaction (
     CONSTRAINT chk_amount_positive CHECK (amount > 0),
     INDEX idx_transaction_account_id (account_id),
     INDEX idx_transaction_created_at (created_at),
-    INDEX idx_transaction_account_idempotency (account_id, idempotency_key)
+    UNIQUE INDEX uk_account_idempotency (account_id, idempotency_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
