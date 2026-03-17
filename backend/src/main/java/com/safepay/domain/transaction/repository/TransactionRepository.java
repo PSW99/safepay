@@ -12,6 +12,4 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Page<Transaction> findByAccountIdOrderByCreatedAtDesc(Long accountId, Pageable pageable);
 
     Optional<Transaction> findByAccountIdAndIdempotencyKey(Long accountId, String idempotencyKey);
-
-    Optional<Transaction> findByIdempotencyKey(String idempotencyKey);
 }

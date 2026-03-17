@@ -13,7 +13,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "transaction")
+@Table(name = "transaction", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_account_idempotency", columnNames = {"account_id", "idempotency_key"})
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)
@@ -39,7 +41,7 @@ public class Transaction {
 
     private String description;
 
-    @Column(name = "idempotency_key", nullable = false, unique = true, length = 36)
+    @Column(name = "idempotency_key", nullable = false, length = 36)
     private String idempotencyKey;
 
     @Enumerated(EnumType.STRING)

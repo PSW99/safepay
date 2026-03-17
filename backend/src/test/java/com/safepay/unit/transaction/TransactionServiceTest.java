@@ -112,7 +112,7 @@ class TransactionServiceTest {
                     1L, "DEPOSIT", new BigDecimal("10000"), new BigDecimal("10000"),
                     "입금", "SUCCESS", null);
 
-            given(transactionRepository.findByIdempotencyKey("test-key")).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, "test-key")).willReturn(Optional.empty());
             given(distributedLockManager.tryLockOrNull(ACCOUNT_ID)).willReturn(rLock);
             given(transactionExecutor.executeDeposit(ACCOUNT_ID, MEMBER_ID, request, "test-key"))
                     .willReturn(expectedResponse);
@@ -133,7 +133,7 @@ class TransactionServiceTest {
             // Given
             DepositRequest request = new DepositRequest(new BigDecimal("10000"), "입금");
 
-            given(transactionRepository.findByIdempotencyKey("test-key")).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, "test-key")).willReturn(Optional.empty());
             given(distributedLockManager.tryLockOrNull(ACCOUNT_ID)).willReturn(rLock);
             given(transactionExecutor.executeDeposit(ACCOUNT_ID, MEMBER_ID, request, "test-key"))
                     .willThrow(new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
@@ -159,7 +159,7 @@ class TransactionServiceTest {
                     1L, "WITHDRAW", new BigDecimal("3000"), new BigDecimal("7000"),
                     "출금", "SUCCESS", null);
 
-            given(transactionRepository.findByIdempotencyKey("test-key")).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, "test-key")).willReturn(Optional.empty());
             given(distributedLockManager.tryLockOrNull(ACCOUNT_ID)).willReturn(rLock);
             given(transactionExecutor.executeWithdraw(ACCOUNT_ID, MEMBER_ID, request, "test-key"))
                     .willReturn(expectedResponse);
@@ -191,7 +191,7 @@ class TransactionServiceTest {
                     sameKey, Transaction.TransactionType.DEPOSIT,
                     new BigDecimal("10000"), new BigDecimal("10000"));
 
-            given(transactionRepository.findByIdempotencyKey(sameKey))
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
                     .willReturn(Optional.of(existingTx));
 
             // When
@@ -214,7 +214,7 @@ class TransactionServiceTest {
                     sameKey, Transaction.TransactionType.WITHDRAW,
                     new BigDecimal("5000"), new BigDecimal("5000"));
 
-            given(transactionRepository.findByIdempotencyKey(sameKey))
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
                     .willReturn(Optional.of(existingTx));
 
             // When
@@ -237,12 +237,47 @@ class TransactionServiceTest {
                     sameKey, Transaction.TransactionType.DEPOSIT,
                     new BigDecimal("10000"), new BigDecimal("10000"));
 
-            given(transactionRepository.findByIdempotencyKey(sameKey))
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
                     .willReturn(Optional.of(existingTx));
 
             // When & Then: 예외가 발생하지 않고 정상 응답을 반환
             TransactionResponse response = transactionService.deposit(ACCOUNT_ID, MEMBER_ID, request, sameKey);
             assertThat(response.getStatus()).isEqualTo("SUCCESS");
+        }
+
+        @Test
+        @DisplayName("서로 다른 계좌가 같은 Idempotency Key를 사용해도 각각 독립 처리된다")
+        void crossAccount_sameKey_processedIndependently() {
+            // Given
+            Long otherAccountId = 2L;
+            String sameKey = "same-key-uuid";
+            DepositRequest request = new DepositRequest(new BigDecimal("10000"), "입금");
+
+            Transaction existingTx = createSavedTransaction(
+                    sameKey, Transaction.TransactionType.DEPOSIT,
+                    new BigDecimal("10000"), new BigDecimal("10000"));
+
+            // 계좌 A: 이미 처리된 거래 존재
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, sameKey))
+                    .willReturn(Optional.of(existingTx));
+            // 계좌 B: 동일 키지만 해당 계좌에는 없음
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(otherAccountId, sameKey))
+                    .willReturn(Optional.empty());
+            given(distributedLockManager.tryLockOrNull(otherAccountId)).willReturn(rLock);
+            given(transactionExecutor.executeDeposit(eq(otherAccountId), eq(MEMBER_ID), eq(request), eq(sameKey)))
+                    .willReturn(new TransactionResponse(
+                            2L, "DEPOSIT", new BigDecimal("10000"), new BigDecimal("10000"),
+                            "입금", "SUCCESS", null));
+
+            // When
+            TransactionResponse responseA = transactionService.deposit(ACCOUNT_ID, MEMBER_ID, request, sameKey);
+            TransactionResponse responseB = transactionService.deposit(otherAccountId, MEMBER_ID, request, sameKey);
+
+            // Then: 계좌 A는 기존 결과 반환, 계좌 B는 새로 처리
+            assertThat(responseA.getTransactionId()).isEqualTo(100L);
+            assertThat(responseB.getTransactionId()).isEqualTo(2L);
+            verify(transactionExecutor, never()).executeDeposit(eq(ACCOUNT_ID), any(), any(), any());
+            verify(transactionExecutor).executeDeposit(otherAccountId, MEMBER_ID, request, sameKey);
         }
 
         @Test
@@ -253,8 +288,8 @@ class TransactionServiceTest {
             String key2 = "key-2";
             DepositRequest request = new DepositRequest(new BigDecimal("5000"), "입금");
 
-            given(transactionRepository.findByIdempotencyKey(key1)).willReturn(Optional.empty());
-            given(transactionRepository.findByIdempotencyKey(key2)).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, key1)).willReturn(Optional.empty());
+            given(transactionRepository.findByAccountIdAndIdempotencyKey(ACCOUNT_ID, key2)).willReturn(Optional.empty());
             given(distributedLockManager.tryLockOrNull(ACCOUNT_ID)).willReturn(rLock);
             given(transactionExecutor.executeDeposit(eq(ACCOUNT_ID), eq(MEMBER_ID), eq(request), any()))
                     .willReturn(new TransactionResponse(

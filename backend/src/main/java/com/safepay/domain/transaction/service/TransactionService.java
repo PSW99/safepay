@@ -29,7 +29,7 @@ public class TransactionService {
     public TransactionResponse deposit(Long accountId, Long memberId,
                                        DepositRequest request, String idempotencyKey) {
         // 멱등성 체크 (락 바깥에서 — 이미 처리된 요청은 빠르게 반환)
-        TransactionResponse existing = checkIdempotency(idempotencyKey);
+        TransactionResponse existing = checkIdempotency(accountId, idempotencyKey);
         if (existing != null) {
             log.info("중복 입금 요청 감지: idempotencyKey={}", idempotencyKey);
             return existing;
@@ -48,7 +48,7 @@ public class TransactionService {
     public TransactionResponse withdraw(Long accountId, Long memberId,
                                         WithdrawRequest request, String idempotencyKey) {
         // 멱등성 체크
-        TransactionResponse existing = checkIdempotency(idempotencyKey);
+        TransactionResponse existing = checkIdempotency(accountId, idempotencyKey);
         if (existing != null) {
             log.info("중복 출금 요청 감지: idempotencyKey={}", idempotencyKey);
             return existing;
@@ -80,8 +80,8 @@ public class TransactionService {
     }
 
     // ─── Private ───
-    private TransactionResponse checkIdempotency(String idempotencyKey) {
-        return transactionRepository.findByIdempotencyKey(idempotencyKey)
+    private TransactionResponse checkIdempotency(Long accountId, String idempotencyKey) {
+        return transactionRepository.findByAccountIdAndIdempotencyKey(accountId, idempotencyKey)
                 .map(TransactionResponse::from)
                 .orElse(null);
     }
