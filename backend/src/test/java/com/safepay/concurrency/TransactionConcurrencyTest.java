@@ -7,6 +7,7 @@ import com.safepay.domain.member.repository.MemberRepository;
 import com.safepay.domain.transaction.dto.TransactionDto.*;
 import com.safepay.domain.transaction.repository.TransactionRepository;
 import com.safepay.domain.transaction.service.TransactionService;
+import com.safepay.domain.transaction.dto.TransferDto;
 import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import com.safepay.global.util.AesEncryptor;
@@ -473,6 +474,229 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
 
             Account result = accountRepository.findById(accountId).orElseThrow();
             assertThat(result.getBalance()).isEqualByComparingTo(new BigDecimal("11000"));
+        }
+    }
+
+    @Nested
+    @DisplayName("송금 동시성 (데드락 방지)")
+    class TransferConcurrency {
+
+        private Long account2Id;
+        private Long member2Id;
+
+        @BeforeEach
+        void setUp() {
+            // 두 번째 계좌 생성 + 10,000원 입금
+            Member member2 = Member.builder()
+                    .email("transfer-target@safepay.com")
+                    .password(passwordEncoder.encode("password123"))
+                    .name("수신자")
+                    .phone(aesEncryptor.encrypt("010-9999-9999"))
+                    .build();
+            member2 = memberRepository.save(member2);
+            member2Id = member2.getId();
+
+            Account account2 = Account.builder()
+                    .member(member2)
+                    .accountNumber(aesEncryptor.encrypt("100-01-999999-9"))
+                    .accountType(Account.AccountType.CHECKING)
+                    .build();
+            account2 = accountRepository.save(account2);
+            account2Id = account2.getId();
+
+            transactionService.deposit(account2Id, member2Id,
+                    new DepositRequest(new BigDecimal("10000"), "초기 입금"),
+                    UUID.randomUUID().toString());
+        }
+
+        @Test
+        @DisplayName("⭐ A→B + B→A 동시 송금 → 데드락 없이 양쪽 잔액 정합성 유지")
+        void concurrentCrossTransfer_noDeadlock_balanceConsistent() throws Exception {
+            // Given: A=10,000원, B=10,000원
+            // A→B 5,000원 + B→A 3,000원 동시 실행
+            // 기대 결과: A = 10000 - 5000 + 3000 = 8000, B = 10000 + 5000 - 3000 = 12000
+            int threadCount = 2;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch ready = new CountDownLatch(threadCount);
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(threadCount);
+            AtomicInteger successCount = new AtomicInteger(0);
+
+            // A→B 5,000원
+            executor.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    transactionService.transfer(accountId, account2Id, memberId,
+                            new TransferDto.TransferRequest(account2Id, new BigDecimal("5000"), "A→B"),
+                            UUID.randomUUID().toString());
+                    successCount.incrementAndGet();
+                } catch (Exception e) {
+                    // 로깅
+                } finally {
+                    done.countDown();
+                }
+            });
+
+            // B→A 3,000원
+            executor.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    transactionService.transfer(account2Id, accountId, member2Id,
+                            new TransferDto.TransferRequest(accountId, new BigDecimal("3000"), "B→A"),
+                            UUID.randomUUID().toString());
+                    successCount.incrementAndGet();
+                } catch (Exception e) {
+                    // 로깅
+                } finally {
+                    done.countDown();
+                }
+            });
+
+            ready.await();
+            start.countDown();
+            boolean completed = done.await(15, TimeUnit.SECONDS);
+            executor.shutdown();
+
+            // Then: 데드락 없이 완료 + 잔액 정합성
+            assertThat(completed).isTrue(); // 15초 내 완료 = 데드락 없음
+            assertThat(successCount.get()).isEqualTo(2);
+
+            Account resultA = accountRepository.findById(accountId).orElseThrow();
+            Account resultB = accountRepository.findById(account2Id).orElseThrow();
+            assertThat(resultA.getBalance()).isEqualByComparingTo(new BigDecimal("8000"));
+            assertThat(resultB.getBalance()).isEqualByComparingTo(new BigDecimal("12000"));
+        }
+
+        @Test
+        @DisplayName("동일 출금 계좌에서 동시 송금 → 잔액 부족 시 일부만 성공")
+        void concurrentTransferFromSameAccount_partialSuccess() throws Exception {
+            // Given: A=10,000원, 5,000원씩 3번 동시 송금 (2번만 성공해야 함)
+            int threadCount = 3;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch ready = new CountDownLatch(threadCount);
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(threadCount);
+            AtomicInteger successCount = new AtomicInteger(0);
+            AtomicInteger failCount = new AtomicInteger(0);
+
+            for (int i = 0; i < threadCount; i++) {
+                final int idx = i;
+                executor.submit(() -> {
+                    ready.countDown();
+                    try {
+                        start.await();
+                        transactionService.transfer(accountId, account2Id, memberId,
+                                new TransferDto.TransferRequest(account2Id, new BigDecimal("5000"), "동시 송금 " + idx),
+                                UUID.randomUUID().toString());
+                        successCount.incrementAndGet();
+                    } catch (Exception e) {
+                        failCount.incrementAndGet();
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+
+            ready.await();
+            start.countDown();
+            done.await(15, TimeUnit.SECONDS);
+            executor.shutdown();
+
+            // Then
+            assertThat(successCount.get()).isEqualTo(2);  // 5000 * 2 = 10000
+            assertThat(failCount.get()).isEqualTo(1);      // 잔액 부족
+
+            Account resultA = accountRepository.findById(accountId).orElseThrow();
+            Account resultB = accountRepository.findById(account2Id).orElseThrow();
+            assertThat(resultA.getBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(resultB.getBalance()).isEqualByComparingTo(new BigDecimal("20000"));
+        }
+
+        @Test
+        @DisplayName("⭐ 10스레드 A→B/B→A 교차 송금 → 전체 잔액 합계 불변")
+        void concurrentCrossTransfer_10threads_totalBalancePreserved() throws Exception {
+            // Given: A=10,000원, B=10,000원 → 합계 20,000원
+            int threadCount = 10;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch ready = new CountDownLatch(threadCount);
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(threadCount);
+            AtomicInteger successCount = new AtomicInteger(0);
+
+            for (int i = 0; i < threadCount; i++) {
+                final int idx = i;
+                executor.submit(() -> {
+                    ready.countDown();
+                    try {
+                        start.await();
+                        if (idx % 2 == 0) {
+                            // A→B 1,000원
+                            transactionService.transfer(accountId, account2Id, memberId,
+                                    new TransferDto.TransferRequest(account2Id, new BigDecimal("1000"), "A→B " + idx),
+                                    UUID.randomUUID().toString());
+                        } else {
+                            // B→A 1,000원
+                            transactionService.transfer(account2Id, accountId, member2Id,
+                                    new TransferDto.TransferRequest(accountId, new BigDecimal("1000"), "B→A " + idx),
+                                    UUID.randomUUID().toString());
+                        }
+                        successCount.incrementAndGet();
+                    } catch (Exception e) {
+                        // 잔액 부족 시 실패 가능
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+
+            ready.await();
+            start.countDown();
+            done.await(15, TimeUnit.SECONDS);
+            executor.shutdown();
+
+            // Then: 전체 잔액 합계는 항상 20,000원 (닫힌 시스템)
+            Account resultA = accountRepository.findById(accountId).orElseThrow();
+            Account resultB = accountRepository.findById(account2Id).orElseThrow();
+            BigDecimal totalBalance = resultA.getBalance().add(resultB.getBalance());
+            assertThat(totalBalance).isEqualByComparingTo(new BigDecimal("20000"));
+        }
+
+        @Test
+        @DisplayName("송금 멱등성 — 동일 키 2회 요청 시 잔액 1번만 변경")
+        void transfer_idempotency_onceOnly() {
+            String sameKey = UUID.randomUUID().toString();
+
+            // 1차 요청
+            transactionService.transfer(accountId, account2Id, memberId,
+                    new TransferDto.TransferRequest(account2Id, new BigDecimal("3000"), "송금"),
+                    sameKey);
+
+            // 2차 요청 (동일 키)
+            transactionService.transfer(accountId, account2Id, memberId,
+                    new TransferDto.TransferRequest(account2Id, new BigDecimal("3000"), "중복 송금"),
+                    sameKey);
+
+            // Then: 잔액은 1번만 변경
+            Account resultA = accountRepository.findById(accountId).orElseThrow();
+            Account resultB = accountRepository.findById(account2Id).orElseThrow();
+            assertThat(resultA.getBalance()).isEqualByComparingTo(new BigDecimal("7000"));
+            assertThat(resultB.getBalance()).isEqualByComparingTo(new BigDecimal("13000"));
+        }
+
+        @Test
+        @DisplayName("송금 후 분산 락이 정상 해제된다")
+        void transfer_lockReleasedAfterCompletion() {
+            transactionService.transfer(accountId, account2Id, memberId,
+                    new TransferDto.TransferRequest(account2Id, new BigDecimal("1000"), "송금"),
+                    UUID.randomUUID().toString());
+
+            // 두 계좌 모두 락이 해제되어야 함
+            String lockKey1 = "safepay:lock:account:" + accountId;
+            String lockKey2 = "safepay:lock:account:" + account2Id;
+            assertThat(redissonClient.getLock(lockKey1).isLocked()).isFalse();
+            assertThat(redissonClient.getLock(lockKey2).isLocked()).isFalse();
         }
     }
 }
