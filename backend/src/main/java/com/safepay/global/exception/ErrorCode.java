@@ -25,6 +25,8 @@ public enum ErrorCode {
     CONCURRENCY_CONFLICT(HttpStatus.CONFLICT, "TX_003", "동시 요청 충돌이 발생했습니다. 잠시 후 재시도해주세요"),
     INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "TX_004", "유효하지 않은 금액입니다"),
     INVALID_IDEMPOTENCY_KEY(HttpStatus.BAD_REQUEST, "TX_005", "Idempotency-Key는 UUID v4 형식이어야 합니다"),
+    SELF_TRANSFER(HttpStatus.BAD_REQUEST, "TX_006", "자기 자신에게 송금할 수 없습니다"),
+    TRANSFER_ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "TX_007", "송금 대상 계좌를 찾을 수 없습니다"),
 
     // Common
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_001", "서버 내부 오류가 발생했습니다"),

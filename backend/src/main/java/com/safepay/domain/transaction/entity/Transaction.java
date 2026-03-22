@@ -92,6 +92,33 @@ public class Transaction {
                 .build();
     }
 
+
+    public static Transaction createTransferOut(Account fromAccount, BigDecimal amount,
+                                                String description, String idempotencyKey) {
+        return Transaction.builder()
+                .account(fromAccount)
+                .type(TransactionType.TRANSFER_OUT)
+                .amount(amount)
+                .balanceAfter(fromAccount.getBalance())
+                .description(description)
+                .idempotencyKey(idempotencyKey)
+                .status(TransactionStatus.SUCCESS)
+                .build();
+    }
+
+    public static Transaction createTransferIn(Account toAccount, BigDecimal amount,
+                                               String description, String idempotencyKey) {
+        return Transaction.builder()
+                .account(toAccount)
+                .type(TransactionType.TRANSFER_IN)
+                .amount(amount)
+                .balanceAfter(toAccount.getBalance())
+                .description(description)
+                .idempotencyKey(idempotencyKey)
+                .status(TransactionStatus.SUCCESS)
+                .build();
+    }
+
     // Enum
     public enum TransactionType {
         DEPOSIT, WITHDRAW, TRANSFER_IN, TRANSFER_OUT
