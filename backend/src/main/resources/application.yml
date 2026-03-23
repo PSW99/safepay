@@ -46,6 +46,7 @@ distributed-lock:
 # Encryption
 encryption:
   aes-key: ${AES_SECRET_KEY}
+  hmac-key: ${HMAC_SECRET_KEY}
 
 # Swagger
 springdoc:

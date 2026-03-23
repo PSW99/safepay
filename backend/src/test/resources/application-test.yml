@@ -26,6 +26,7 @@ jwt:
 # Encryption
 encryption:
   aes-key: safepay-test-aes-256-key!!-padding
+  hmac-key: safepay-test-hmac-256-key!!-pad!!
 
 # Distributed Lock
 distributed-lock:
