@@ -10,6 +10,7 @@ import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import com.safepay.global.util.AccountNumberGenerator;
 import com.safepay.global.util.AesEncryptor;
+import com.safepay.global.util.HmacUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,7 +28,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -49,6 +52,9 @@ class AccountServiceTest {
     @Mock
     private AesEncryptor aesEncryptor;
 
+    @Mock
+    private HmacUtil hmacUtil;
+
     private Member member;
     private Account account;
 
@@ -65,6 +71,7 @@ class AccountServiceTest {
         account = Account.builder()
                 .member(member)
                 .accountNumber("encryptedAccountNumber")
+                .accountNumberHash("abc123def456")
                 .accountType(Account.AccountType.CHECKING)
                 .build();
         ReflectionTestUtils.setField(account, "id", 1L);
@@ -84,7 +91,8 @@ class AccountServiceTest {
             given(memberRepository.findById(1L)).willReturn(Optional.of(member));
             given(accountNumberGenerator.generate("CHECKING")).willReturn("100-01-123456-7");
             given(aesEncryptor.encrypt("100-01-123456-7")).willReturn("encryptedNumber");
-            given(accountRepository.existsByAccountNumber("encryptedNumber")).willReturn(false);
+            given(hmacUtil.hash("100-01-123456-7")).willReturn("hmacHash64chars");
+            given(accountRepository.existsByAccountNumberHash("hmacHash64chars")).willReturn(false);
             given(accountRepository.saveAndFlush(any(Account.class))).willReturn(account);
 
             // When
@@ -104,7 +112,8 @@ class AccountServiceTest {
             given(memberRepository.findById(1L)).willReturn(Optional.of(member));
             given(accountNumberGenerator.generate("CHECKING")).willReturn("100-01-123456-7");
             given(aesEncryptor.encrypt("100-01-123456-7")).willReturn("encryptedNumber");
-            given(accountRepository.existsByAccountNumber("encryptedNumber")).willReturn(false);
+            given(hmacUtil.hash("100-01-123456-7")).willReturn("hmacHash64chars");
+            given(accountRepository.existsByAccountNumberHash("hmacHash64chars")).willReturn(false);
             given(accountRepository.saveAndFlush(any(Account.class))).willReturn(account);
 
             // When
@@ -113,6 +122,54 @@ class AccountServiceTest {
             // Then
             verify(aesEncryptor).encrypt("100-01-123456-7");
             verify(accountRepository).saveAndFlush(any(Account.class));
+        }
+
+        @Test
+        @DisplayName("블라인드 인덱스(HMAC)가 생성되어 중복 검사에 사용된다")
+        void createAccount_blindIndexUsedForUniquenessCheck() {
+            // Given
+            CreateRequest request = new CreateRequest(Account.AccountType.CHECKING);
+
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+            given(accountNumberGenerator.generate("CHECKING")).willReturn("100-01-123456-7");
+            given(aesEncryptor.encrypt(anyString())).willReturn("encryptedNumber");
+            given(hmacUtil.hash("100-01-123456-7")).willReturn("hmacHash64chars");
+            given(accountRepository.existsByAccountNumberHash("hmacHash64chars")).willReturn(false);
+            given(accountRepository.saveAndFlush(any(Account.class))).willReturn(account);
+
+            // When
+            accountService.createAccount(1L, request);
+
+            // Then: HMAC 해시로 중복 검사 (기존 existsByAccountNumber가 아님)
+            verify(hmacUtil).hash("100-01-123456-7");
+            verify(accountRepository).existsByAccountNumberHash("hmacHash64chars");
+            verify(accountRepository, never()).existsByAccountNumber(anyString());
+        }
+
+        @Test
+        @DisplayName("블라인드 인덱스 중복 시 새 계좌번호를 재생성한다")
+        void createAccount_hashCollision_regenerates() {
+            // Given
+            CreateRequest request = new CreateRequest(Account.AccountType.CHECKING);
+
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+            // 1번째: 중복 → 2번째: 성공
+            given(accountNumberGenerator.generate("CHECKING"))
+                    .willReturn("100-01-111111-1")
+                    .willReturn("100-01-222222-2");
+            given(aesEncryptor.encrypt(anyString())).willReturn("enc");
+            given(hmacUtil.hash("100-01-111111-1")).willReturn("hash1");
+            given(hmacUtil.hash("100-01-222222-2")).willReturn("hash2");
+            given(accountRepository.existsByAccountNumberHash("hash1")).willReturn(true);  // 중복!
+            given(accountRepository.existsByAccountNumberHash("hash2")).willReturn(false); // 성공
+            given(accountRepository.saveAndFlush(any(Account.class))).willReturn(account);
+
+            // When
+            accountService.createAccount(1L, request);
+
+            // Then: 2번 생성 시도
+            verify(accountNumberGenerator, org.mockito.Mockito.times(2)).generate("CHECKING");
         }
 
         @Test
@@ -136,6 +193,7 @@ class AccountServiceTest {
             Account savingsAccount = Account.builder()
                     .member(member)
                     .accountNumber("encryptedSavings")
+                    .accountNumberHash("savingsHash")
                     .accountType(Account.AccountType.SAVINGS)
                     .build();
             ReflectionTestUtils.setField(savingsAccount, "id", 2L);
@@ -143,7 +201,8 @@ class AccountServiceTest {
             given(memberRepository.findById(1L)).willReturn(Optional.of(member));
             given(accountNumberGenerator.generate("SAVINGS")).willReturn("100-02-654321-3");
             given(aesEncryptor.encrypt("100-02-654321-3")).willReturn("encryptedSavings");
-            given(accountRepository.existsByAccountNumber("encryptedSavings")).willReturn(false);
+            given(hmacUtil.hash("100-02-654321-3")).willReturn("savingsHash");
+            given(accountRepository.existsByAccountNumberHash("savingsHash")).willReturn(false);
             given(accountRepository.saveAndFlush(any(Account.class))).willReturn(savingsAccount);
 
             // When
@@ -166,6 +225,7 @@ class AccountServiceTest {
             Account account2 = Account.builder()
                     .member(member)
                     .accountNumber("encryptedNumber2")
+                    .accountNumberHash("hash2")
                     .accountType(Account.AccountType.SAVINGS)
                     .build();
             ReflectionTestUtils.setField(account2, "id", 2L);

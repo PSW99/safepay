@@ -16,6 +16,7 @@ jwt:
 # Encryption
 encryption:
   aes-key: safepay-aes-256-secret!-for-local-dev
+  hmac-key: safepay-hmac-256-secret-for-local!!
 
 # Logging
 logging:

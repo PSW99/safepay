@@ -11,6 +11,7 @@ import com.safepay.domain.transaction.dto.TransferDto;
 import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import com.safepay.global.util.AesEncryptor;
+import com.safepay.global.util.HmacUtil;
 import com.safepay.integration.IntegrationTestBase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +53,9 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
     private AesEncryptor aesEncryptor;
 
     @Autowired
+    private HmacUtil hmacUtil;
+
+    @Autowired
     private RedissonClient redissonClient;
 
     private Long accountId;
@@ -77,6 +81,7 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
         Account account = Account.builder()
                 .member(member)
                 .accountNumber(aesEncryptor.encrypt("100-01-000000-0"))
+                .accountNumberHash(hmacUtil.hash("100-01-000000-0"))
                 .accountType(Account.AccountType.CHECKING)
                 .build();
         account = accountRepository.save(account);
@@ -328,6 +333,7 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
             Account account2 = Account.builder()
                     .member(member2)
                     .accountNumber(aesEncryptor.encrypt("100-01-111111-1"))
+                    .accountNumberHash(hmacUtil.hash("100-01-111111-1"))
                     .accountType(Account.AccountType.CHECKING)
                     .build();
             account2 = accountRepository.save(account2);
@@ -426,6 +432,7 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
             Account account2 = Account.builder()
                     .member(member2)
                     .accountNumber(aesEncryptor.encrypt("100-01-222222-2"))
+                    .accountNumberHash(hmacUtil.hash("100-01-222222-2"))
                     .accountType(Account.AccountType.CHECKING)
                     .build();
             account2 = accountRepository.save(account2);
@@ -499,6 +506,7 @@ class TransactionConcurrencyTest extends IntegrationTestBase {
             Account account2 = Account.builder()
                     .member(member2)
                     .accountNumber(aesEncryptor.encrypt("100-01-999999-9"))
+                    .accountNumberHash(hmacUtil.hash("100-01-999999-9"))
                     .accountType(Account.AccountType.CHECKING)
                     .build();
             account2 = accountRepository.save(account2);

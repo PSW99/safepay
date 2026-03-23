@@ -9,6 +9,7 @@ import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import com.safepay.global.util.AccountNumberGenerator;
 import com.safepay.global.util.AesEncryptor;
+import com.safepay.global.util.HmacUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,20 +28,23 @@ public class AccountService {
     private final MemberRepository memberRepository;
     private final AccountNumberGenerator accountNumberGenerator;
     private final AesEncryptor aesEncryptor;
+    private final HmacUtil hmacUtil;
 
     @Transactional
     public CreateResponse createAccount(Long memberId, CreateRequest request) {
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.AUTH_INVALID_CREDENTIALS));
 
-        // 계좌번호 생성 및 암호화
-        String[] numbers = generateUniqueAccountNumber(request.getAccountType().name());
-        String accountNumber = numbers[0];    // 평문 (응답용)
-        String encryptedNumber = numbers[1];  // 암호문 (저장용)
+        // 계좌번호 생성 + 암호화 + 블라인드 인덱스
+        String[] result = generateUniqueAccountNumber(request.getAccountType().name());
+        String accountNumber = result[0];     // 평문 (응답용)
+        String encryptedNumber = result[1];   // AES-GCM 암호문 (저장용 — 복호화 가능)
+        String accountNumberHash = result[2]; // HMAC-SHA-256 해시 (유일성 검증용)
 
         Account account = Account.builder()
                 .member(member)
                 .accountNumber(encryptedNumber)
+                .accountNumberHash(accountNumberHash)
                 .accountType(request.getAccountType())
                 .build();
 
@@ -75,17 +79,20 @@ public class AccountService {
         return AccountResponse.from(account, aesEncryptor.decrypt(account.getAccountNumber()));
     }
 
-    // [0] = 평문 계좌번호, [1] = AES 암호화된 계좌번호
+    /**
+     * 유일한 계좌번호를 생성한다.
+     *
+     * @return [0] 평문 계좌번호, [1] AES 암호문, [2] HMAC 해시
+     */
     private String[] generateUniqueAccountNumber(String accountType) {
         int attempts = 0;
         while (true) {
             String accountNumber = accountNumberGenerator.generate(accountType);
             String encrypted = aesEncryptor.encrypt(accountNumber);
-            // TODO: AES-GCM의 무작위 IV로 인해 동일 평문도 매번 다른 암호문을 생성하므로,
-            //       이 체크는 암호문 수준의 충돌만 감지할 뿐 평문 중복을 막지 못함.
-            //       Phase 2에서 HMAC-SHA-256 블라인드 인덱스 컬럼으로 대체 예정.
-            if (!accountRepository.existsByAccountNumber(encrypted)) {
-                return new String[]{accountNumber, encrypted};
+            String hash = hmacUtil.hash(accountNumber);
+
+            if (!accountRepository.existsByAccountNumberHash(hash)) {
+                return new String[]{accountNumber, encrypted, hash};
             }
             if (++attempts >= 10) {
                 throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);

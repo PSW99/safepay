@@ -30,8 +30,11 @@ public class Account {
     @JoinColumn(name = "member_id", nullable = false)
     private Member member;
 
-    @Column(name = "account_number", nullable = false, unique = true)
+    @Column(name = "account_number", nullable = false)
     private String accountNumber;
+
+    @Column(name = "account_number_hash", nullable = false, unique = true, length = 64)
+    private String accountNumberHash;
 
     @Column(nullable = false, precision = 15, scale = 2)
     private BigDecimal balance;
@@ -56,9 +59,11 @@ public class Account {
     private LocalDateTime updatedAt;
 
     @Builder
-    public Account(Member member, String accountNumber, AccountType accountType) {
+    public Account(Member member, String accountNumber, String accountNumberHash,
+                   AccountType accountType) {
         this.member = member;
         this.accountNumber = accountNumber;
+        this.accountNumberHash = accountNumberHash;
         this.balance = BigDecimal.ZERO;
         this.accountType = accountType;
         this.status = AccountStatus.ACTIVE;
