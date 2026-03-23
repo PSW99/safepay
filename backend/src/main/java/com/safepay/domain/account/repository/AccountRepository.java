@@ -12,15 +12,19 @@ import java.util.Optional;
 
 public interface AccountRepository extends JpaRepository<Account, Long> {
 
-    /**
-     * 비관적 락으로 계좌 조회 (SELECT ... FOR UPDATE)
-     * ADR-001: 입출금 동시성 제어를 위해 사용
-     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM Account a WHERE a.id = :id")
     Optional<Account> findByIdWithLock(@Param("id") Long id);
 
     List<Account> findByMemberId(Long memberId);
 
+    // 블라인드 인덱스로 계좌번호 중복 검사
+    boolean existsByAccountNumberHash(String accountNumberHash);
+
+    /**
+     * @deprecated Phase 1 호환용. AES-GCM 랜덤 IV로 인해 정확한 중복 검사 불가.
+     *             existsByAccountNumberHash()를 사용할 것.
+     */
+    @Deprecated
     boolean existsByAccountNumber(String accountNumber);
 }
