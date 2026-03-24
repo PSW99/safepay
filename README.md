@@ -11,8 +11,8 @@
 | Language | Java 17 |
 | Framework | Spring Boot 3.2.3, Spring Security, Spring Data JPA |
 | Database | MySQL 8.0 (InnoDB) |
-| Cache / Lock | Redis 7 (Redisson) |
-| Auth | JWT (jjwt, BCrypt) |
+| Cache / Lock / Session | Redis 7 (Redisson, Refresh Token 저장) |
+| Auth | JWT (jjwt, BCrypt), Refresh Token Rotation |
 | Encryption | AES-256-GCM, HMAC-SHA-256 |
 | Infra | Docker Compose, GitHub Actions CI |
 | Test | JUnit 5, Mockito, Testcontainers (MySQL + Redis), AssertJ |
@@ -28,7 +28,9 @@ Client
 │                                                                  │
 │  AuthController ──→ MemberService                                │
 │    POST /auth/signup        BCrypt + AES-256 암호화              │
-│    POST /auth/login         JWT Access + Refresh 발급            │
+│    POST /auth/login         JWT 발급 + Redis에 Refresh Token 저장│
+│    POST /auth/refresh       Rotation + Reuse Detection           │
+│    POST /auth/logout        Redis에서 Refresh Token 즉시 삭제    │
 │                                                                  │
 │  AccountController ──→ AccountService                            │
 │    POST /accounts           Luhn 계좌번호 + AES 암호화           │
@@ -46,7 +48,8 @@ Client
 └──────────────────────────────────────────────────────────────────┘
   ↓                 ↓
 Redis 7            MySQL 8.0
-(분산 락)          (비관적 락, 데이터 저장)
+(분산 락,          (비관적 락, 데이터 저장)
+ Refresh Token)
 ```
 
 ## 핵심 설계
@@ -91,6 +94,20 @@ Header: Idempotency-Key: {UUID}
 
 → [ADR-002 멱등성 설계](https://github.com/PSW99/SafePay/wiki/ADR-002-멱등성-설계)
 
+### 인증 — Refresh Token Rotation
+
+```
+로그인 → Access Token(30m) + Refresh Token(7d) 발급, JTI를 Redis에 저장
+갱신  → 기존 Refresh Token 폐기 + 새 토큰 쌍 발급 (Rotation)
+탈취  → 폐기된 토큰 재사용 감지 → 해당 회원의 전체 세션 무효화 (Reuse Detection)
+```
+
+- **1회용 Refresh Token**: 갱신할 때마다 새 토큰 발급, 이전 토큰 즉시 폐기
+- **Reuse Detection**: 폐기된 토큰이 재사용되면 탈취로 판단하여 전체 세션 무효화
+- **즉시 로그아웃**: Redis에서 Refresh Token 삭제 → 갱신 즉시 차단
+
+→ [ADR-009 Refresh Token Rotation](https://github.com/PSW99/safepay/wiki/ADR-009-Refresh-Token-Rotation-%E2%80%94-%ED%86%A0%ED%81%B0-%ED%83%88%EC%B7%A8-%EB%8C%80%EC%9D%91)
+
 ### PII 암호화 + 블라인드 인덱스
 
 | 데이터 | 방식 | 저장 형태 | 용도 |
@@ -111,7 +128,9 @@ HMAC-SHA-256 블라인드 인덱스를 별도 컬럼으로 저장하여 평문 �
 | API | Method | Path | 인증 | 비고 |
 |-----|--------|------|:---:|------|
 | 회원가입 | POST | `/api/v1/auth/signup` | - | |
-| 로그인 | POST | `/api/v1/auth/login` | - | JWT 발급 |
+| 로그인 | POST | `/api/v1/auth/login` | - | JWT 발급 + Redis 저장 |
+| 토큰 갱신 | POST | `/api/v1/auth/refresh` | - | Rotation + Reuse Detection |
+| 로그아웃 | POST | `/api/v1/auth/logout` | ✅ | Redis 즉시 삭제 |
 | 계좌 개설 | POST | `/api/v1/accounts` | ✅ | HMAC 블라인드 인덱스 |
 | 내 계좌 목록 | GET | `/api/v1/accounts` | ✅ | |
 | 계좌 상세 | GET | `/api/v1/accounts/{id}` | ✅ | 소유자 검증 |
@@ -127,14 +146,14 @@ HMAC-SHA-256 블라인드 인덱스를 별도 컬럼으로 저장하여 평문 �
 ```
 test/
 ├── unit/           — Mockito (Spring 컨텍스트 없음)
-│   ├── member/     MemberServiceTest
+│   ├── member/     MemberServiceTest (로그인, 갱신, Reuse Detection, 로그아웃)
 │   ├── account/    AccountServiceTest, AccountTest
 │   ├── transaction/TransactionServiceTest, TransactionExecutorTest
 │   └── global/     AesEncryptorTest, JwtTokenProviderTest,
 │                   AccountNumberGeneratorTest, HmacUtilTest,
-│                   DistributedLockManagerTest
+│                   DistributedLockManagerTest, RefreshTokenStoreTest
 ├── integration/    — @SpringBootTest + Testcontainers (MySQL 8.0 + Redis 7)
-│   ├── AuthControllerTest
+│   ├── AuthControllerTest (회원가입, 로그인, 갱신, Rotation, Reuse Detection, 로그아웃)
 │   ├── AccountControllerTest
 │   └── TransactionControllerTest
 └── concurrency/    — ExecutorService + CountDownLatch
@@ -182,13 +201,13 @@ cd backend
 ```bash
 # 전체 테스트
 ./gradlew test
-
+ 
 # 단위 테스트만
 ./gradlew test --tests "com.safepay.unit.*"
-
+ 
 # 통합 테스트만 (Docker 필요 — Testcontainers)
 ./gradlew test --tests "com.safepay.integration.*"
-
+ 
 # 동시성 테스트만
 ./gradlew test --tests "com.safepay.concurrency.*"
 ```
@@ -199,11 +218,11 @@ cd backend
 backend/src/main/java/com/safepay/
 ├── domain/
 │   ├── member/
-│   │   ├── controller/  AuthController
-│   │   ├── service/     MemberService
+│   │   ├── controller/  AuthController (signup, login, refresh, logout)
+│   │   ├── service/     MemberService (Refresh Token Rotation, Reuse Detection)
 │   │   ├── repository/  MemberRepository
 │   │   ├── entity/      Member
-│   │   └── dto/         AuthDto
+│   │   └── dto/         AuthDto, RefreshDto
 │   ├── account/
 │   │   ├── controller/  AccountController
 │   │   ├── service/     AccountService (블라인드 인덱스 기반 중복 검사)
@@ -220,23 +239,26 @@ backend/src/main/java/com/safepay/
 └── global/
     ├── config/          SecurityConfig, SwaggerConfig, JpaConfig, RedissonConfig
     ├── exception/       ErrorCode, CustomException, GlobalExceptionHandler
-    ├── security/        JwtTokenProvider, JwtAuthFilter, CustomUserPrincipal
+    ├── security/        JwtTokenProvider (JTI 지원), JwtAuthFilter,
+    │                    CustomUserPrincipal, RefreshTokenStore (Redis)
     └── util/            AesEncryptor, HmacUtil, AccountNumberGenerator,
                          DistributedLockManager
 ```
 
 ## Wiki
 
-| 문서                                                                                                                                                                                                                                                          | 내용 |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
-| [ADR-001 동시성 제어](https://github.com/PSW99/SafePay/wiki/ADR-001-동시성-제어)                                                                                                                                                                                      | 분산 락 + 비관적 락 이중 방어 |
-| [ADR-002 멱등성 설계](https://github.com/PSW99/SafePay/wiki/ADR-002-멱등성-설계)                                                                                                                                                                                      | 계좌 스코프 Idempotency Key |
-| [ADR-003 암호화 전략](https://github.com/PSW99/SafePay/wiki/ADR-003-암호화-전략)                                                                                                                                                                                      | AES-256-GCM, BCrypt, HMAC-SHA-256 |
-| [ADR-004 인증 방식](https://github.com/PSW99/SafePay/wiki/ADR-004-인증-방식)                                                                                                                                                                                        | JWT Stateless 인증 설계 |
-| [ADR-005 에러 처리 전략](https://github.com/PSW99/safepay/wiki/ADR-005-%EC%97%90%EB%9F%AC-%EC%B2%98%EB%A6%AC-%EB%B0%8F-%EC%97%90%EB%9F%AC-%EC%BD%94%EB%93%9C-%EC%B2%B4%EA%B3%84)                                                                                  | 도메인 에러 코드 체계 (TX_001~TX_007) |
-| [ADR-006 분산 락 도입](https://github.com/PSW99/safepay/wiki/ADR-006-Redis-%EB%B6%84%EC%82%B0-%EB%9D%BD-%EB%8F%84%EC%9E%85)                                                                                                                                      | Redisson 분산 락 + Graceful Degradation |
-| [ADR-007 송금 동시성 제어](https://github.com/PSW99/safepay/wiki/ADR-007-%EC%86%A1%EA%B8%88-%EB%8F%99%EC%8B%9C%EC%84%B1-%EC%A0%9C%EC%96%B4-%E2%80%94-%EB%8D%B0%EB%93%9C%EB%9D%BD-%EB%B0%A9%EC%A7%80-%EC%A0%84%EB%9E%B5)                                            | 오름차순 락 데드락 방지 전략 |
+| 문서 | 내용 |
+|------|------|
+| [ADR-001 동시성 제어](https://github.com/PSW99/SafePay/wiki/ADR-001-동시성-제어) | 분산 락 + 비관적 락 이중 방어 |
+| [ADR-002 멱등성 설계](https://github.com/PSW99/SafePay/wiki/ADR-002-멱등성-설계) | 계좌 스코프 Idempotency Key |
+| [ADR-003 암호화 전략](https://github.com/PSW99/SafePay/wiki/ADR-003-암호화-전략) | AES-256-GCM, BCrypt, HMAC-SHA-256 |
+| [ADR-004 인증 방식](https://github.com/PSW99/SafePay/wiki/ADR-004-인증-방식) | JWT Stateless 인증 설계 |
+| [ADR-005 에러 처리 전략](https://github.com/PSW99/safepay/wiki/ADR-005-%EC%97%90%EB%9F%AC-%EC%B2%98%EB%A6%AC-%EB%B0%8F-%EC%97%90%EB%9F%AC-%EC%BD%94%EB%93%9C-%EC%B2%B4%EA%B3%84) | 도메인 에러 코드 체계 (AUTH_001~006, TX_001~007) |
+| [ADR-006 분산 락 도입](https://github.com/PSW99/safepay/wiki/ADR-006-Redis-%EB%B6%84%EC%82%B0-%EB%9D%BD-%EB%8F%84%EC%9E%85) | Redisson 분산 락 + Graceful Degradation |
+| [ADR-007 송금 동시성 제어](https://github.com/PSW99/safepay/wiki/ADR-007-%EC%86%A1%EA%B8%88-%EB%8F%99%EC%8B%9C%EC%84%B1-%EC%A0%9C%EC%96%B4-%E2%80%94-%EB%8D%B0%EB%93%9C%EB%9D%BD-%EB%B0%A9%EC%A7%80-%EC%A0%84%EB%9E%B5) | 오름차순 락 데드락 방지 전략 |
 | [ADR-008 블라인드 인덱스](https://github.com/PSW99/safepay/wiki/ADR-008-%EB%B8%94%EB%9D%BC%EC%9D%B8%EB%93%9C-%EC%9D%B8%EB%8D%B1%EC%8A%A4-%E2%80%94-%EC%95%94%ED%98%B8%ED%99%94%EB%90%9C-%EC%BB%AC%EB%9F%BC%EC%9D%98-%EC%9C%A0%EC%9D%BC%EC%84%B1-%EB%B3%B4%EC%9E%A5) | HMAC-SHA-256 평문 유일성 보장 |
-| [Troubleshooting-001](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90001%E2%80%90%ED%86%B5%ED%95%A9%ED%85%8C%EC%8A%A4%ED%8A%B8%E2%80%90%EC%8B%A4%ED%8C%A8)                                                                                   | Testcontainers 싱글턴 컨테이너 패턴 |
-| [Troubleshooting-002](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90002:-%EB%A9%B1%EB%93%B1%EC%84%B1-%ED%82%A4-%EB%8F%99%EC%8B%9C-%EC%9A%94%EC%B2%AD-%EC%8B%9C-Hibernate-%EC%84%B8%EC%85%98-%EA%B9%A8%EC%A7%90)                             | 멱등성 키 동시 요청 시 Hibernate 세션 깨짐 |
-| [Troubleshooting-003](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90003:-@Transactional-Self%E2%80%90Invocation%EC%9C%BC%EB%A1%9C-%ED%8A%B8%EB%9E%9C%EC%9E%AD%EC%85%98-%EB%AF%B8%EC%A0%81%EC%9A%A9)                              | @Transactional Self‐Invocation으로 트랜잭션 미적용 |
+| [ADR-009 Refresh Token Rotation](https://github.com/PSW99/safepay/wiki/ADR-009-Refresh-Token-Rotation-%E2%80%94-%ED%86%A0%ED%81%B0-%ED%83%88%EC%B7%A8-%EB%8C%80%EC%9D%91) | 토큰 탈취 대응 + Reuse Detection |
+| [Troubleshooting-001](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90001%E2%80%90%ED%86%B5%ED%95%A9%ED%85%8C%EC%8A%A4%ED%8A%B8%E2%80%90%EC%8B%A4%ED%8C%A8) | Testcontainers 싱글턴 컨테이너 패턴 |
+| [Troubleshooting-002](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90002:-%EB%A9%B1%EB%93%B1%EC%84%B1-%ED%82%A4-%EB%8F%99%EC%8B%9C-%EC%9A%94%EC%B2%AD-%EC%8B%9C-Hibernate-%EC%84%B8%EC%85%98-%EA%B9%A8%EC%A7%90) | 멱등성 키 동시 요청 시 Hibernate 세션 깨짐 |
+| [Troubleshooting-003](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90003:-@Transactional-Self%E2%80%90Invocation%EC%9C%BC%EB%A1%9C-%ED%8A%B8%EB%9E%9C%EC%9E%AD%EC%85%98-%EB%AF%B8%EC%A0%81%EC%9A%A9) | @Transactional Self‑Invocation으로 트랜잭션 미적용 |
+ 
