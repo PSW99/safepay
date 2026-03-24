@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -35,18 +36,32 @@ public class JwtTokenProvider {
     }
 
     public String createAccessToken(Long memberId, String email, String role) {
-        return createToken(memberId, email, role, accessTokenExpiry);
+        return createToken(memberId, email, role, accessTokenExpiry, null);
     }
 
+    // Refresh Token 생성 — JTI(JWT ID) 포함
     public String createRefreshToken(Long memberId, String email, String role) {
-        return createToken(memberId, email, role, refreshTokenExpiry);
+        String jti = UUID.randomUUID().toString();
+        return createToken(memberId, email, role, refreshTokenExpiry, jti);
     }
 
-    private String createToken(Long memberId, String email, String role, long expiry) {
+    private String createToken(Long memberId, String email, String role, long expiry, String jti) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expiry);
 
-        return Jwts.builder().subject(String.valueOf(memberId)).claim("email", email).claim("role", role).issuedAt(now).expiration(expiryDate).signWith(key).compact();
+        var builder = Jwts.builder()
+                .subject(String.valueOf(memberId))
+                .claim("email", email)
+                .claim("role", role)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(key);
+
+        if (jti != null) {
+            builder.id(jti);
+        }
+
+        return builder.compact();
     }
 
     public Long getMemberId(String token) {
@@ -62,6 +77,12 @@ public class JwtTokenProvider {
     public String getRole(String token) {
         Claims claims = parseClaims(token);
         return claims.get("role", String.class);
+    }
+
+    // Refresh Token의 JTI(JWT ID)를 추출한다.
+    public String getTokenId(String token) {
+        Claims claims = parseClaims(token);
+        return claims.getId();
     }
 
     public boolean validateToken(String token) {
@@ -80,6 +101,10 @@ public class JwtTokenProvider {
     }
 
     private Claims parseClaims(String token) {
-        return Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 }

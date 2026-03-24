@@ -13,6 +13,8 @@ public enum ErrorCode {
     AUTH_TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "AUTH_002", "토큰이 만료되었습니다"),
     AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_003", "유효하지 않은 토큰입니다"),
     AUTH_DUPLICATE_EMAIL(HttpStatus.CONFLICT, "AUTH_004", "이미 가입된 이메일입니다"),
+    AUTH_TOKEN_REUSE_DETECTED(HttpStatus.UNAUTHORIZED, "AUTH_005", "토큰 재사용이 감지되었습니다. 다시 로그인해주세요"),
+    AUTH_REFRESH_TOKEN_NOT_FOUND(HttpStatus.UNAUTHORIZED, "AUTH_006", "유효한 리프레시 토큰이 없습니다"),
 
     // Account
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "ACCOUNT_001", "계좌를 찾을 수 없습니다"),
