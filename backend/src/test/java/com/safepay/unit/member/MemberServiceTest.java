@@ -272,11 +272,11 @@ class MemberServiceTest {
         void refresh_success() {
             // Given
             String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
             given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(oldRefreshToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(oldRefreshToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
 
             given(jwtTokenProvider.createAccessToken(1L, "test@safepay.com", "USER"))
                     .willReturn("new-access-token");
@@ -294,15 +294,41 @@ class MemberServiceTest {
         }
 
         @Test
+        @DisplayName("갱신 시 DB에서 현재 회원 상태를 조회하여 토큰을 발급한다")
+        void refresh_usesCurrentMemberState() {
+            // Given: DB에서 role이 ADMIN으로 변경된 상태
+            String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
+            ReflectionTestUtils.setField(member, "role", Member.Role.ADMIN);
+
+            given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("new-at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("new-rt");
+            given(jwtTokenProvider.getTokenId("new-rt")).willReturn("jti-v2");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-v2")).willReturn(1L);
+
+            // When
+            memberService.refresh(oldRefreshToken);
+
+            // Then: 토큰 클레임이 아닌 DB의 현재 role(ADMIN)로 발급
+            verify(jwtTokenProvider).createAccessToken(1L, "test@safepay.com", "ADMIN");
+            verify(jwtTokenProvider).createRefreshToken(1L, "test@safepay.com", "ADMIN");
+        }
+
+        @Test
         @DisplayName("갱신 시 원자적 비교-교체(compareAndRotate)가 호출된다")
         void refresh_usesAtomicCompareAndRotate() {
             // Given
             String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
             given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(oldRefreshToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(oldRefreshToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
 
             given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("new-at");
             given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("new-rt");
@@ -345,9 +371,29 @@ class MemberServiceTest {
                     .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
                             .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID));
 
-            // Redis에 접근하지 않아야 한다
+            // DB, Redis에 접근하지 않아야 한다
+            verify(memberRepository, never()).findById(any());
             verify(refreshTokenStore, never()).compareAndRotate(any(), any(), any());
-            verify(refreshTokenStore, never()).get(any());
+        }
+
+        @Test
+        @DisplayName("탈퇴한 회원이면 AUTH_MEMBER_NOT_FOUND 예외가 발생한다")
+        void refresh_deletedMember_throwsException() {
+            // Given
+            String refreshToken = "valid-token";
+            given(jwtTokenProvider.validateToken(refreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(refreshToken)).willReturn(999L);
+            given(jwtTokenProvider.getTokenId(refreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(999L)).willReturn(Optional.empty());
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh(refreshToken))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_MEMBER_NOT_FOUND));
+
+            // Redis CAS는 호출되지 않아야 한다
+            verify(refreshTokenStore, never()).compareAndRotate(any(), any(), any());
         }
 
         @Test
@@ -355,11 +401,11 @@ class MemberServiceTest {
         void refresh_noTokenInRedis_throwsException() {
             // Given: 로그아웃된 상태
             String refreshToken = "valid-token";
+            Member member = createMember();
             given(jwtTokenProvider.validateToken(refreshToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(refreshToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(refreshToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(refreshToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(refreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
             given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
             given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
             given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-v2");
@@ -383,11 +429,11 @@ class MemberServiceTest {
         void refresh_reuseDetected_invalidatesAllSessions() {
             // Given: Redis에 jti-v2가 저장된 상태에서 jti-v1으로 갱신 시도
             String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
             given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(oldRefreshToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(oldRefreshToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
             given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
             given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
             given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-new");
@@ -404,13 +450,13 @@ class MemberServiceTest {
         @DisplayName("Reuse Detection 후 정상 토큰도 갱신 불가 (전체 무효화)")
         void refresh_afterReuseDetection_validTokenAlsoFails() {
             // 시나리오: 공격자가 v1로 갱신 → Lua script가 키 삭제 → 정상 유저의 v2도 실패
+            Member member = createMember();
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
 
             // 1단계: 공격자의 v1 갱신 시도 → Reuse Detection (Lua script가 키 삭제)
             String attackerToken = "attacker-token";
             given(jwtTokenProvider.validateToken(attackerToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(attackerToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(attackerToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(attackerToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(attackerToken)).willReturn("jti-v1");
             given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
             given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
@@ -425,8 +471,6 @@ class MemberServiceTest {
             String validToken = "valid-token";
             given(jwtTokenProvider.validateToken(validToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(validToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(validToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(validToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(validToken)).willReturn("jti-v2");
             given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at2");
             given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt2");
@@ -491,11 +535,11 @@ class MemberServiceTest {
 
             // 갱신 시도
             String refreshToken = "some-token";
+            Member member = createMember();
             given(jwtTokenProvider.validateToken(refreshToken)).willReturn(true);
             given(jwtTokenProvider.getMemberId(refreshToken)).willReturn(1L);
-            given(jwtTokenProvider.getEmail(refreshToken)).willReturn("test@safepay.com");
-            given(jwtTokenProvider.getRole(refreshToken)).willReturn("USER");
             given(jwtTokenProvider.getTokenId(refreshToken)).willReturn("jti-old");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
             given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
             given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
             given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-new");
