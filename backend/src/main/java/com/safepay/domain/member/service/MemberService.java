@@ -73,6 +73,7 @@ public class MemberService {
     }
 
     // Refresh Token Rotation — 토큰 갱신
+    @Transactional(readOnly = true)
     public RefreshResponse refresh(String refreshToken) {
         // JWT 서명/만료 검증
         if (!jwtTokenProvider.validateToken(refreshToken)) {
@@ -80,8 +81,6 @@ public class MemberService {
         }
 
         Long memberId = jwtTokenProvider.getMemberId(refreshToken);
-        String email = jwtTokenProvider.getEmail(refreshToken);
-        String role = jwtTokenProvider.getRole(refreshToken);
         String tokenId = jwtTokenProvider.getTokenId(refreshToken);
 
         // JTI가 없는 토큰(Access Token 등)은 즉시 거절
@@ -89,9 +88,15 @@ public class MemberService {
             throw new CustomException(ErrorCode.AUTH_TOKEN_INVALID);
         }
 
+        // DB에서 현재 회원 상태를 조회하여 최신 권한으로 토큰 발급
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new CustomException(ErrorCode.AUTH_MEMBER_NOT_FOUND));
+
         // 새 토큰 쌍 발급 (CAS 전에 생성 — 실패 시 버려짐)
-        String newAccessToken = jwtTokenProvider.createAccessToken(memberId, email, role);
-        String newRefreshToken = jwtTokenProvider.createRefreshToken(memberId, email, role);
+        String newAccessToken = jwtTokenProvider.createAccessToken(
+                member.getId(), member.getEmail(), member.getRole().name());
+        String newRefreshToken = jwtTokenProvider.createRefreshToken(
+                member.getId(), member.getEmail(), member.getRole().name());
         String newTokenId = jwtTokenProvider.getTokenId(newRefreshToken);
 
         // 원자적 비교-교체 (Lua script): get → 비교 → save를 단일 연산으로 수행
