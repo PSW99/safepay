@@ -379,7 +379,8 @@ class AuthControllerTest extends IntegrationTestBase {
             RefreshDto.RefreshRequest firstRequest = new RefreshDto.RefreshRequest(refreshToken);
             mockMvc.perform(post("/api/v1/auth/refresh")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(firstRequest)));
+                    .content(objectMapper.writeValueAsString(firstRequest)))
+                    .andExpect(status().isOk());
 
             // When & Then: 이전 토큰으로 2차 갱신 → 실패 (Reuse Detection)
             mockMvc.perform(post("/api/v1/auth/refresh")
@@ -406,7 +407,9 @@ class AuthControllerTest extends IntegrationTestBase {
             // 이전 토큰으로 갱신 → Reuse Detection → 전체 세션 무효화
             mockMvc.perform(post("/api/v1/auth/refresh")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(firstRequest)));
+                    .content(objectMapper.writeValueAsString(firstRequest)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_005"));
 
             // When & Then: 새 토큰으로도 갱신 불가 (세션 전체가 무효화됨)
             RefreshDto.RefreshRequest newRequest = new RefreshDto.RefreshRequest(newRefreshToken);
