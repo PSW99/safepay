@@ -84,29 +84,24 @@ public class MemberService {
         String role = jwtTokenProvider.getRole(refreshToken);
         String tokenId = jwtTokenProvider.getTokenId(refreshToken);
 
-        // Redis에서 저장된 JTI 조회
-        String storedTokenId = refreshTokenStore.get(memberId);
+        // 새 토큰 쌍 먼저 생성
+        String newAccessToken = jwtTokenProvider.createAccessToken(memberId, email, role);
+        String newRefreshToken = jwtTokenProvider.createRefreshToken(memberId, email, role);
+        String newTokenId = jwtTokenProvider.getTokenId(newRefreshToken);
 
-        if (storedTokenId == null) {
+        // 원자적 CAS: 기존 JTI와 일치할 때만 새 JTI로 교체 (경쟁 조건 방지)
+        long result = refreshTokenStore.rotateToken(memberId, tokenId, newTokenId);
+
+        if (result == -1L) {
             // 로그아웃된 상태이거나 TTL 만료
             throw new CustomException(ErrorCode.AUTH_REFRESH_TOKEN_NOT_FOUND);
         }
 
-        // Reuse Detection — JTI 불일치 시 탈취 의심
-        if (!storedTokenId.equals(tokenId)) {
-            log.warn("Refresh Token 재사용 감지! memberId={}, expected={}, actual={}",
-                    memberId, storedTokenId, tokenId);
-            refreshTokenStore.delete(memberId); // 전체 세션 무효화
+        if (result == 0L) {
+            // Reuse Detection — 폐기된 토큰 재사용 감지, Redis 키는 Lua 스크립트에서 이미 삭제됨
+            log.warn("Refresh Token 재사용 감지! memberId={}", memberId);
             throw new CustomException(ErrorCode.AUTH_TOKEN_REUSE_DETECTED);
         }
-
-        // 새 토큰 쌍 발급 (Rotation)
-        String newAccessToken = jwtTokenProvider.createAccessToken(memberId, email, role);
-        String newRefreshToken = jwtTokenProvider.createRefreshToken(memberId, email, role);
-
-        // 새 JTI를 Redis에 저장 (기존 덮어씀 → 이전 토큰 자동 무효화)
-        String newTokenId = jwtTokenProvider.getTokenId(newRefreshToken);
-        refreshTokenStore.save(memberId, newTokenId);
 
         log.info("토큰 갱신 완료: memberId={}", memberId);
 
