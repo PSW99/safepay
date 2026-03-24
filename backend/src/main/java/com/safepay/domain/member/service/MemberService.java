@@ -84,29 +84,26 @@ public class MemberService {
         String role = jwtTokenProvider.getRole(refreshToken);
         String tokenId = jwtTokenProvider.getTokenId(refreshToken);
 
-        // Redis에서 저장된 JTI 조회
-        String storedTokenId = refreshTokenStore.get(memberId);
-
-        if (storedTokenId == null) {
-            // 로그아웃된 상태이거나 TTL 만료
-            throw new CustomException(ErrorCode.AUTH_REFRESH_TOKEN_NOT_FOUND);
+        // JTI가 없는 토큰(Access Token 등)은 즉시 거절
+        if (tokenId == null) {
+            throw new CustomException(ErrorCode.AUTH_TOKEN_INVALID);
         }
 
-        // Reuse Detection — JTI 불일치 시 탈취 의심
-        if (!storedTokenId.equals(tokenId)) {
-            log.warn("Refresh Token 재사용 감지! memberId={}, expected={}, actual={}",
-                    memberId, storedTokenId, tokenId);
-            refreshTokenStore.delete(memberId); // 전체 세션 무효화
-            throw new CustomException(ErrorCode.AUTH_TOKEN_REUSE_DETECTED);
-        }
-
-        // 새 토큰 쌍 발급 (Rotation)
+        // 새 토큰 쌍 발급 (CAS 전에 생성 — 실패 시 버려짐)
         String newAccessToken = jwtTokenProvider.createAccessToken(memberId, email, role);
         String newRefreshToken = jwtTokenProvider.createRefreshToken(memberId, email, role);
-
-        // 새 JTI를 Redis에 저장 (기존 덮어씀 → 이전 토큰 자동 무효화)
         String newTokenId = jwtTokenProvider.getTokenId(newRefreshToken);
-        refreshTokenStore.save(memberId, newTokenId);
+
+        // 원자적 비교-교체 (Lua script): get → 비교 → save를 단일 연산으로 수행
+        long result = refreshTokenStore.compareAndRotate(memberId, tokenId, newTokenId);
+
+        if (result == -1) {
+            throw new CustomException(ErrorCode.AUTH_REFRESH_TOKEN_NOT_FOUND);
+        }
+        if (result == 0) {
+            log.warn("Refresh Token 재사용 감지! memberId={}", memberId);
+            throw new CustomException(ErrorCode.AUTH_TOKEN_REUSE_DETECTED);
+        }
 
         log.info("토큰 갱신 완료: memberId={}", memberId);
 
