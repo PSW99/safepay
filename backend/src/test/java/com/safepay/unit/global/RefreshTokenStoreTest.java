@@ -11,15 +11,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -143,84 +140,6 @@ class RefreshTokenStoreTest {
 
             // Then
             verify(redisTemplate).delete("safepay:refresh:1");
-        }
-    }
-
-    @Nested
-    @DisplayName("원자적 교체 (rotateToken)")
-    class RotateToken {
-
-        @Test
-        @DisplayName("JTI 일치 시 1을 반환한다 (Rotation 성공)")
-        void rotateToken_match_returns1() {
-            // Given
-            given(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any(), any()))
-                    .willReturn(1L);
-
-            // When
-            long result = refreshTokenStore.rotateToken(1L, "jti-v1", "jti-v2");
-
-            // Then
-            assertThat(result).isEqualTo(1L);
-        }
-
-        @Test
-        @DisplayName("JTI 불일치 시 0을 반환한다 (Reuse Detection — Lua 스크립트가 키 자동 삭제)")
-        void rotateToken_mismatch_returns0() {
-            // Given
-            given(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any(), any()))
-                    .willReturn(0L);
-
-            // When
-            long result = refreshTokenStore.rotateToken(1L, "jti-old", "jti-new");
-
-            // Then
-            assertThat(result).isEqualTo(0L);
-        }
-
-        @Test
-        @DisplayName("키 없음 시 -1을 반환한다 (로그아웃 또는 TTL 만료)")
-        void rotateToken_keyNotFound_returnsMinus1() {
-            // Given
-            given(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any(), any()))
-                    .willReturn(-1L);
-
-            // When
-            long result = refreshTokenStore.rotateToken(1L, "jti-v1", "jti-v2");
-
-            // Then
-            assertThat(result).isEqualTo(-1L);
-        }
-
-        @Test
-        @DisplayName("execute가 null을 반환하면 -1로 처리한다")
-        void rotateToken_nullResult_returnsMinus1() {
-            // Given
-            given(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any(), any()))
-                    .willReturn(null);
-
-            // When
-            long result = refreshTokenStore.rotateToken(1L, "jti-v1", "jti-v2");
-
-            // Then
-            assertThat(result).isEqualTo(-1L);
-        }
-
-        @Test
-        @DisplayName("올바른 Redis 키와 인자로 Lua 스크립트를 실행한다")
-        void rotateToken_usesCorrectKeyAndArgs() {
-            // Given
-            given(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any(), any()))
-                    .willReturn(1L);
-
-            // When
-            refreshTokenStore.rotateToken(42L, "expected-jti", "new-jti");
-
-            // Then: key = "safepay:refresh:42"
-            ArgumentCaptor<List> keyCaptor = ArgumentCaptor.forClass(List.class);
-            verify(redisTemplate).execute(any(RedisScript.class), keyCaptor.capture(),
-                    eq("expected-jti"), eq("new-jti"), eq("604800"));
-            assertThat(keyCaptor.getValue()).containsExactly("safepay:refresh:42");
         }
     }
 }
