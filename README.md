@@ -96,7 +96,7 @@ Header: Idempotency-Key: {UUID}
 
 ### 인증 — Refresh Token Rotation
 
-```
+```text
 로그인 → Access Token(30m) + Refresh Token(7d) 발급, JTI를 Redis에 저장
 갱신  → 기존 Refresh Token 폐기 + 새 토큰 쌍 발급 (Rotation)
 탈취  → 폐기된 토큰 재사용 감지 → 해당 회원의 전체 세션 무효화 (Reuse Detection)
