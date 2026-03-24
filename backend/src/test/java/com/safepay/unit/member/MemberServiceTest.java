@@ -1,12 +1,14 @@
 package com.safepay.unit.member;
 
 import com.safepay.domain.member.dto.AuthDto.*;
+import com.safepay.domain.member.dto.RefreshDto;
 import com.safepay.domain.member.entity.Member;
 import com.safepay.domain.member.repository.MemberRepository;
 import com.safepay.domain.member.service.MemberService;
 import com.safepay.global.exception.CustomException;
 import com.safepay.global.exception.ErrorCode;
 import com.safepay.global.security.JwtTokenProvider;
+import com.safepay.global.security.RefreshTokenStore;
 import com.safepay.global.util.AesEncryptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -46,6 +48,9 @@ class MemberServiceTest {
 
     @Mock
     private AesEncryptor aesEncryptor;
+
+    @Mock
+    private RefreshTokenStore refreshTokenStore;
 
     private SignupRequest createSignupRequest() {
         return new SignupRequest(
@@ -254,6 +259,297 @@ class MemberServiceTest {
             assertThat(ex2).isNotNull();
             assertThat(ex1.getErrorCode()).isEqualTo(ex2.getErrorCode());
             assertThat(ex1.getErrorCode()).isEqualTo(ErrorCode.AUTH_INVALID_CREDENTIALS);
+        }
+    }
+
+    // 토큰 갱신 (Refresh Token Rotation)
+    @Nested
+    @DisplayName("토큰 갱신")
+    class Refresh {
+
+        @Test
+        @DisplayName("정상 갱신 시 새 Access Token + Refresh Token을 반환한다")
+        void refresh_success() {
+            // Given
+            String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
+            given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+            given(jwtTokenProvider.createAccessToken(1L, "test@safepay.com", "USER"))
+                    .willReturn("new-access-token");
+            given(jwtTokenProvider.createRefreshToken(1L, "test@safepay.com", "USER"))
+                    .willReturn("new-refresh-token");
+            given(jwtTokenProvider.getTokenId("new-refresh-token")).willReturn("jti-v2");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-v2")).willReturn(1L);
+
+            // When
+            RefreshDto.RefreshResponse response = memberService.refresh(oldRefreshToken);
+
+            // Then
+            assertThat(response.getAccessToken()).isEqualTo("new-access-token");
+            assertThat(response.getRefreshToken()).isEqualTo("new-refresh-token");
+        }
+
+        @Test
+        @DisplayName("갱신 시 DB에서 현재 회원 상태를 조회하여 토큰을 발급한다")
+        void refresh_usesCurrentMemberState() {
+            // Given: DB에서 role이 ADMIN으로 변경된 상태
+            String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
+            ReflectionTestUtils.setField(member, "role", Member.Role.ADMIN);
+
+            given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("new-at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("new-rt");
+            given(jwtTokenProvider.getTokenId("new-rt")).willReturn("jti-v2");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-v2")).willReturn(1L);
+
+            // When
+            memberService.refresh(oldRefreshToken);
+
+            // Then: 토큰 클레임이 아닌 DB의 현재 role(ADMIN)로 발급
+            verify(jwtTokenProvider).createAccessToken(1L, "test@safepay.com", "ADMIN");
+            verify(jwtTokenProvider).createRefreshToken(1L, "test@safepay.com", "ADMIN");
+        }
+
+        @Test
+        @DisplayName("갱신 시 원자적 비교-교체(compareAndRotate)가 호출된다")
+        void refresh_usesAtomicCompareAndRotate() {
+            // Given
+            String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
+            given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("new-at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("new-rt");
+            given(jwtTokenProvider.getTokenId("new-rt")).willReturn("jti-v2");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-v2")).willReturn(1L);
+
+            // When
+            memberService.refresh(oldRefreshToken);
+
+            // Then: 원자적 CAS가 호출되고, 분리된 get/save는 호출되지 않는다
+            verify(refreshTokenStore).compareAndRotate(1L, "jti-v1", "jti-v2");
+            verify(refreshTokenStore, never()).get(any());
+            verify(refreshTokenStore, never()).save(any(), any());
+        }
+
+        @Test
+        @DisplayName("만료된 토큰으로 갱신 시 AUTH_TOKEN_INVALID 예외가 발생한다")
+        void refresh_expiredToken_throwsException() {
+            // Given
+            given(jwtTokenProvider.validateToken("expired-token")).willReturn(false);
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh("expired-token"))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID));
+        }
+
+        @Test
+        @DisplayName("JTI가 null이면 Redis 조회 없이 AUTH_TOKEN_INVALID 예외가 발생한다")
+        void refresh_nullJti_throwsException() {
+            // Given: Access Token처럼 JTI가 없는 토큰
+            given(jwtTokenProvider.validateToken("access-token")).willReturn(true);
+            given(jwtTokenProvider.getMemberId("access-token")).willReturn(1L);
+            given(jwtTokenProvider.getTokenId("access-token")).willReturn(null);
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh("access-token"))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_TOKEN_INVALID));
+
+            // DB, Redis에 접근하지 않아야 한다
+            verify(memberRepository, never()).findById(any());
+            verify(refreshTokenStore, never()).compareAndRotate(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("탈퇴한 회원이면 AUTH_MEMBER_NOT_FOUND 예외가 발생한다")
+        void refresh_deletedMember_throwsException() {
+            // Given
+            String refreshToken = "valid-token";
+            given(jwtTokenProvider.validateToken(refreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(refreshToken)).willReturn(999L);
+            given(jwtTokenProvider.getTokenId(refreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(999L)).willReturn(Optional.empty());
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh(refreshToken))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_MEMBER_NOT_FOUND));
+
+            // Redis CAS는 호출되지 않아야 한다
+            verify(refreshTokenStore, never()).compareAndRotate(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Redis에 토큰이 없으면 AUTH_REFRESH_TOKEN_NOT_FOUND 예외가 발생한다")
+        void refresh_noTokenInRedis_throwsException() {
+            // Given: 로그아웃된 상태
+            String refreshToken = "valid-token";
+            Member member = createMember();
+            given(jwtTokenProvider.validateToken(refreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(refreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(refreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
+            given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-v2");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-v2")).willReturn(-1L);
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh(refreshToken))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_NOT_FOUND));
+        }
+    }
+
+    // Reuse Detection (탈취 감지)
+    @Nested
+    @DisplayName("Reuse Detection")
+    class ReuseDetection {
+
+        @Test
+        @DisplayName("⭐ 폐기된 토큰으로 갱신 시 AUTH_TOKEN_REUSE_DETECTED (Lua script가 세션 무효화)")
+        void refresh_reuseDetected_invalidatesAllSessions() {
+            // Given: Redis에 jti-v2가 저장된 상태에서 jti-v1으로 갱신 시도
+            String oldRefreshToken = "old-refresh-token";
+            Member member = createMember();
+            given(jwtTokenProvider.validateToken(oldRefreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(oldRefreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(oldRefreshToken)).willReturn("jti-v1");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
+            given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-new");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-new")).willReturn(0L);
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh(oldRefreshToken))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_TOKEN_REUSE_DETECTED));
+        }
+
+        @Test
+        @DisplayName("Reuse Detection 후 정상 토큰도 갱신 불가 (전체 무효화)")
+        void refresh_afterReuseDetection_validTokenAlsoFails() {
+            // 시나리오: 공격자가 v1로 갱신 → Lua script가 키 삭제 → 정상 유저의 v2도 실패
+            Member member = createMember();
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+
+            // 1단계: 공격자의 v1 갱신 시도 → Reuse Detection (Lua script가 키 삭제)
+            String attackerToken = "attacker-token";
+            given(jwtTokenProvider.validateToken(attackerToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(attackerToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(attackerToken)).willReturn("jti-v1");
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
+            given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-new");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v1", "jti-new")).willReturn(0L);
+
+            try {
+                memberService.refresh(attackerToken);
+            } catch (CustomException ignored) {}
+
+            // 2단계: 정상 유저의 v2 갱신 시도 → Lua script가 키 없음 반환
+            String validToken = "valid-token";
+            given(jwtTokenProvider.validateToken(validToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(validToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(validToken)).willReturn("jti-v2");
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at2");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt2");
+            given(jwtTokenProvider.getTokenId("rt2")).willReturn("jti-new2");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-v2", "jti-new2")).willReturn(-1L);
+
+            assertThatThrownBy(() -> memberService.refresh(validToken))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_NOT_FOUND));
+        }
+    }
+
+    // 로그인 시 Redis 저장
+    @Nested
+    @DisplayName("로그인 시 Refresh Token 저장")
+    class LoginRefreshToken {
+
+        @Test
+        @DisplayName("로그인 성공 시 Refresh Token JTI가 Redis에 저장된다")
+        void login_savesRefreshTokenToRedis() {
+            // Given
+            LoginRequest request = createLoginRequest();
+            Member member = createMember();
+
+            given(memberRepository.findByEmail(request.getEmail())).willReturn(Optional.of(member));
+            given(passwordEncoder.matches("password123", member.getPassword())).willReturn(true);
+            given(jwtTokenProvider.createAccessToken(1L, "test@safepay.com", "USER"))
+                    .willReturn("access-token");
+            given(jwtTokenProvider.createRefreshToken(1L, "test@safepay.com", "USER"))
+                    .willReturn("refresh-token");
+            given(jwtTokenProvider.getTokenId("refresh-token")).willReturn("jti-new");
+
+            // When
+            memberService.login(request);
+
+            // Then
+            verify(refreshTokenStore).save(1L, "jti-new");
+        }
+    }
+
+    // 로그아웃
+    @Nested
+    @DisplayName("로그아웃")
+    class Logout {
+
+        @Test
+        @DisplayName("로그아웃 시 Redis에서 Refresh Token이 삭제된다")
+        void logout_deletesFromRedis() {
+            // When
+            memberService.logout(1L);
+
+            // Then
+            verify(refreshTokenStore).delete(1L);
+        }
+
+        @Test
+        @DisplayName("로그아웃 후 갱신 시도 → AUTH_REFRESH_TOKEN_NOT_FOUND")
+        void logout_thenRefresh_fails() {
+            // Given: 로그아웃
+            memberService.logout(1L);
+
+            // 갱신 시도
+            String refreshToken = "some-token";
+            Member member = createMember();
+            given(jwtTokenProvider.validateToken(refreshToken)).willReturn(true);
+            given(jwtTokenProvider.getMemberId(refreshToken)).willReturn(1L);
+            given(jwtTokenProvider.getTokenId(refreshToken)).willReturn("jti-old");
+            given(memberRepository.findById(1L)).willReturn(Optional.of(member));
+            given(jwtTokenProvider.createAccessToken(any(), any(), any())).willReturn("at");
+            given(jwtTokenProvider.createRefreshToken(any(), any(), any())).willReturn("rt");
+            given(jwtTokenProvider.getTokenId("rt")).willReturn("jti-new");
+            given(refreshTokenStore.compareAndRotate(1L, "jti-old", "jti-new")).willReturn(-1L);
+
+            // When & Then
+            assertThatThrownBy(() -> memberService.refresh(refreshToken))
+                    .isInstanceOf(CustomException.class)
+                    .satisfies(ex -> assertThat(((CustomException) ex).getErrorCode())
+                            .isEqualTo(ErrorCode.AUTH_REFRESH_TOKEN_NOT_FOUND));
         }
     }
 }

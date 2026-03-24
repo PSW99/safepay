@@ -3,6 +3,7 @@ package com.safepay.integration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safepay.domain.account.repository.AccountRepository;
 import com.safepay.domain.member.dto.AuthDto.*;
+import com.safepay.domain.member.dto.RefreshDto;
 import com.safepay.domain.member.repository.MemberRepository;
 import com.safepay.domain.transaction.repository.TransactionRepository;
 import org.junit.jupiter.api.*;
@@ -13,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -310,6 +312,222 @@ class AuthControllerTest extends IntegrationTestBase {
                             org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                                     .get("/api/v1/accounts"))
                     .andExpect(status().isUnauthorized());
+        }
+    }
+
+    // 토큰 갱신 API
+    @Nested
+    @DisplayName("POST /api/v1/auth/refresh")
+    class RefreshApi {
+
+        private String refreshToken;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            // 회원가입 + 로그인하여 Refresh Token 획득
+            signupMember();
+
+            LoginRequest loginRequest = new LoginRequest("test@safepay.com", "password123");
+            MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(loginRequest)))
+                    .andReturn();
+
+            LoginResponse loginResponse = objectMapper.readValue(
+                    result.getResponse().getContentAsString(), LoginResponse.class);
+            refreshToken = loginResponse.getRefreshToken();
+        }
+
+        @Test
+        @DisplayName("정상 갱신 시 200 OK와 새 토큰 쌍을 반환한다")
+        void refresh_success_returns200() throws Exception {
+            // Given
+            RefreshDto.RefreshRequest request = new RefreshDto.RefreshRequest(refreshToken);
+
+            // When & Then
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                    .andExpect(jsonPath("$.refreshToken").isNotEmpty());
+        }
+
+        @Test
+        @DisplayName("갱신된 Access Token으로 인증 API에 접근할 수 있다")
+        void refresh_newAccessToken_isUsable() throws Exception {
+            // Given: 갱신
+            RefreshDto.RefreshRequest request = new RefreshDto.RefreshRequest(refreshToken);
+            MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andReturn();
+
+            RefreshDto.RefreshResponse refreshResponse = objectMapper.readValue(
+                    result.getResponse().getContentAsString(), RefreshDto.RefreshResponse.class);
+
+            // When & Then: 새 Access Token으로 보호된 API 호출
+            mockMvc.perform(get("/api/v1/accounts")
+                            .header("Authorization", "Bearer " + refreshResponse.getAccessToken()))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("⭐ 갱신 후 이전 Refresh Token으로 재갱신하면 401을 반환한다 (Rotation)")
+        void refresh_oldToken_returns401() throws Exception {
+            // Given: 1차 갱신 성공
+            RefreshDto.RefreshRequest firstRequest = new RefreshDto.RefreshRequest(refreshToken);
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(firstRequest)))
+                    .andExpect(status().isOk());
+
+            // When & Then: 이전 토큰으로 2차 갱신 → 실패 (Reuse Detection)
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(firstRequest)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_005"));
+        }
+
+        @Test
+        @DisplayName("⭐ Reuse Detection 후 새 토큰으로도 갱신 불가 (전체 세션 무효화)")
+        void refresh_afterReuseDetection_newTokenAlsoFails() throws Exception {
+            // Given: 1차 갱신 → 새 토큰 획득
+            RefreshDto.RefreshRequest firstRequest = new RefreshDto.RefreshRequest(refreshToken);
+            MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(firstRequest)))
+                    .andReturn();
+
+            RefreshDto.RefreshResponse firstResponse = objectMapper.readValue(
+                    result.getResponse().getContentAsString(), RefreshDto.RefreshResponse.class);
+            String newRefreshToken = firstResponse.getRefreshToken();
+
+            // 이전 토큰으로 갱신 → Reuse Detection → 전체 세션 무효화
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(firstRequest)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_005"));
+
+            // When & Then: 새 토큰으로도 갱신 불가 (세션 전체가 무효화됨)
+            RefreshDto.RefreshRequest newRequest = new RefreshDto.RefreshRequest(newRefreshToken);
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(newRequest)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_006"));
+        }
+
+        @Test
+        @DisplayName("잘못된 토큰으로 갱신하면 401을 반환한다")
+        void refresh_invalidToken_returns401() throws Exception {
+            // Given
+            RefreshDto.RefreshRequest request = new RefreshDto.RefreshRequest("invalid.jwt.token");
+
+            // When & Then
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_003"));
+        }
+
+        @Test
+        @DisplayName("Refresh Token 없이 요청하면 400을 반환한다")
+        void refresh_noToken_returns400() throws Exception {
+            // Given
+            String json = "{}";
+
+            // When & Then
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json))
+                    .andExpect(status().isBadRequest());
+        }
+    }
+
+    // 로그아웃 API
+    @Nested
+    @DisplayName("POST /api/v1/auth/logout")
+    class LogoutApi {
+
+        private String accessToken;
+        private String refreshToken;
+
+        @BeforeEach
+        void setUp() throws Exception {
+            // 회원가입 + 로그인
+            signupMember();
+
+            LoginRequest loginRequest = new LoginRequest("test@safepay.com", "password123");
+            MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(loginRequest)))
+                    .andReturn();
+
+            LoginResponse loginResponse = objectMapper.readValue(
+                    result.getResponse().getContentAsString(), LoginResponse.class);
+            accessToken = loginResponse.getAccessToken();
+            refreshToken = loginResponse.getRefreshToken();
+        }
+
+        @Test
+        @DisplayName("정상 로그아웃 시 204 No Content를 반환한다")
+        void logout_success_returns204() throws Exception {
+            mockMvc.perform(post("/api/v1/auth/logout")
+                            .header("Authorization", "Bearer " + accessToken))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        @DisplayName("⭐ 로그아웃 후 Refresh Token으로 갱신하면 401을 반환한다")
+        void logout_thenRefresh_returns401() throws Exception {
+            // Given: 로그아웃
+            mockMvc.perform(post("/api/v1/auth/logout")
+                    .header("Authorization", "Bearer " + accessToken));
+
+            // When & Then: 갱신 시도 → 실패
+            RefreshDto.RefreshRequest request = new RefreshDto.RefreshRequest(refreshToken);
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("AUTH_006"));
+        }
+
+        @Test
+        @DisplayName("인증 없이 로그아웃하면 401을 반환한다")
+        void logout_withoutToken_returns401() throws Exception {
+            mockMvc.perform(post("/api/v1/auth/logout"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("로그아웃 후 재로그인하면 새 토큰으로 정상 동작한다")
+        void logout_thenRelogin_success() throws Exception {
+            // Given: 로그아웃
+            mockMvc.perform(post("/api/v1/auth/logout")
+                    .header("Authorization", "Bearer " + accessToken));
+
+            // When: 재로그인
+            LoginRequest loginRequest = new LoginRequest("test@safepay.com", "password123");
+            MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(loginRequest)))
+                    .andReturn();
+
+            LoginResponse newLogin = objectMapper.readValue(
+                    result.getResponse().getContentAsString(), LoginResponse.class);
+
+            // Then: 새 토큰으로 갱신 성공
+            RefreshDto.RefreshRequest refreshRequest = new RefreshDto.RefreshRequest(newLogin.getRefreshToken());
+            mockMvc.perform(post("/api/v1/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(refreshRequest)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.accessToken").isNotEmpty());
         }
     }
 }

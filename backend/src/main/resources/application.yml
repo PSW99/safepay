@@ -37,6 +37,10 @@ jwt:
   access-token-expiry: 1800000    # 30분
   refresh-token-expiry: 604800000 # 7일
 
+# Refresh Token
+refresh-token:
+  prefix: "safepay:refresh:"
+
 # Distributed Lock
 distributed-lock:
   key-prefix: "safepay:lock:account:"
