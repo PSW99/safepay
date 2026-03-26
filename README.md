@@ -261,4 +261,6 @@ backend/src/main/java/com/safepay/
 | [Troubleshooting-001](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90001%E2%80%90%ED%86%B5%ED%95%A9%ED%85%8C%EC%8A%A4%ED%8A%B8%E2%80%90%EC%8B%A4%ED%8C%A8) | Testcontainers 싱글턴 컨테이너 패턴 |
 | [Troubleshooting-002](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90002:-%EB%A9%B1%EB%93%B1%EC%84%B1-%ED%82%A4-%EB%8F%99%EC%8B%9C-%EC%9A%94%EC%B2%AD-%EC%8B%9C-Hibernate-%EC%84%B8%EC%85%98-%EA%B9%A8%EC%A7%90) | 멱등성 키 동시 요청 시 Hibernate 세션 깨짐 |
 | [Troubleshooting-003](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90003:-@Transactional-Self%E2%80%90Invocation%EC%9C%BC%EB%A1%9C-%ED%8A%B8%EB%9E%9C%EC%9E%AD%EC%85%98-%EB%AF%B8%EC%A0%81%EC%9A%A9) | @Transactional Self‑Invocation으로 트랜잭션 미적용 |
+| [Troubleshooting-004](https://github.com/PSW99/safepay/wiki/Troubleshooting%E2%80%90004:-Refresh-Token-Rotation-%EA%B2%BD%EC%9F%81-%EC%A1%B0%EA%B1%B4-%E2%80%94-Lua-Script-CAS%EB%A1%9C-%ED%95%B4%EA%B2%B0) | Refresh Token Rotation 경쟁 조건 — Lua Script CAS로 해결 |
+
  
