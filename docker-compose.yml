@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # MySQL 8.0
   mysql:
     image: mysql:8.0
     container_name: safepay-mysql
@@ -27,7 +26,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis
   redis:
     image: redis:7-alpine
     container_name: safepay-redis
@@ -40,5 +38,31 @@ services:
       timeout: 5s
       retries: 5
 
+  # Prometheus — 메트릭 수집
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: safepay-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    # host.docker.internal로 로컬 Spring Boot 앱에 접근
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Grafana — 대시보드
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: safepay-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+
 volumes:
   mysql-data:
+  grafana-data:

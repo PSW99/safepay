@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s      # 5초마다 메트릭 수집
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Spring Boot Actuator (로컬에서 실행 중인 앱)
+  - job_name: 'safepay'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          application: 'safepay'

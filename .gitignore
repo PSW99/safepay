@@ -26,3 +26,9 @@ dist/
 
 # Docker volumes
 mysql-data/
+
+# k6 results
+k6/results/
+
+# Grafana data
+grafana-data/
