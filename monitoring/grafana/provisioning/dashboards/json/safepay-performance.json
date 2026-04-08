@@ -1,0 +1,182 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "title": "🔴 HikariCP — Active / Idle / Pending Connections",
+      "description": "pending이 올라가면 커넥션 풀 고갈 징후",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "pending" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 3 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "active" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "idle" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "hikaricp_connections_active{application=\"safepay\"}",
+          "legendFormat": "active"
+        },
+        {
+          "expr": "hikaricp_connections_idle{application=\"safepay\"}",
+          "legendFormat": "idle"
+        },
+        {
+          "expr": "hikaricp_connections_pending{application=\"safepay\"}",
+          "legendFormat": "pending"
+        }
+      ]
+    },
+    {
+      "title": "🔴 HikariCP — Connection Timeout (누적)",
+      "description": "이 값이 올라가면 커넥션 풀 고갈로 요청 실패",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "hikaricp_connections_timeout_total{application=\"safepay\"}",
+          "legendFormat": "timeouts"
+        }
+      ]
+    },
+    {
+      "title": "HikariCP — Max Pool Size",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "targets": [
+        {
+          "expr": "hikaricp_connections_max{application=\"safepay\"}",
+          "legendFormat": "max"
+        }
+      ]
+    },
+    {
+      "title": "📊 HTTP Request Rate (req/sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "unit": "reqps"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"safepay\"}[30s]))",
+          "legendFormat": "total req/s"
+        },
+        {
+          "expr": "sum(rate(http_server_requests_seconds_count{application=\"safepay\", status=~\"5..\"}[30s]))",
+          "legendFormat": "5xx errors/s"
+        }
+      ]
+    },
+    {
+      "title": "📊 HTTP Response Time (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2 },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{application=\"safepay\", uri=~\"/api/v1/accounts/.*/deposit|/api/v1/accounts/.*/withdraw|/api/v1/accounts/.*/transfer\"}[30s])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"safepay\", uri=~\"/api/v1/accounts/.*/deposit|/api/v1/accounts/.*/withdraw|/api/v1/accounts/.*/transfer\"}[30s])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{application=\"safepay\", uri=~\"/api/v1/accounts/.*/deposit|/api/v1/accounts/.*/withdraw|/api/v1/accounts/.*/transfer\"}[30s])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "title": "💰 Transaction API — Endpoint별 TPS",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "unit": "reqps"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(http_server_requests_seconds_count{application=\"safepay\", uri=\"/api/v1/accounts/{accountId}/deposit\"}[30s])",
+          "legendFormat": "deposit"
+        },
+        {
+          "expr": "rate(http_server_requests_seconds_count{application=\"safepay\", uri=\"/api/v1/accounts/{accountId}/withdraw\"}[30s])",
+          "legendFormat": "withdraw"
+        },
+        {
+          "expr": "rate(http_server_requests_seconds_count{application=\"safepay\", uri=\"/api/v1/accounts/{accountId}/transfer\"}[30s])",
+          "legendFormat": "transfer"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["safepay", "performance"],
+  "templating": { "list": [] },
+  "time": { "from": "now-5m", "to": "now" },
+  "title": "SafePay — Performance & HikariCP Monitor",
+  "uid": "safepay-perf-001",
+  "version": 1
+}
